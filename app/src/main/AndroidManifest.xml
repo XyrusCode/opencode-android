@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/res/com"
+    package="com.xyruscode.opencode">
+
+    <!-- Internet permission for WebSocket connection -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Network state permission -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="keyHidden|keyVisible|orientation|screenSize|smallestScreenSize|uiMode"
+            android:theme="@style/Theme.Material3.Dark.NoActionBar.Fullscreen"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.MAIN_ACTION" />
+
+                <category android:name="android.intent.CATEGORY_DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
