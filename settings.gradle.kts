@@ -1,3 +1,3 @@
 rootProject.name = "Video-Plucker-Android"
 
-include ":app"
+include(":app")
