@@ -4,12 +4,6 @@ plugins {
     id("com.squareup.suitegrade") version "1.2.1" apply false
 }
 
-// Project repositories
-repositories {
-    google()
-    mavenCentral()
-}
-
 // Project configuration
 project.ext {
     composeBom = "1.6.0"
