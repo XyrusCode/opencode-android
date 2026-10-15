@@ -1,0 +1,48 @@
+name: R2 Probe
+
+# Temporary: resolves the account id from the API token and lists buckets, so
+# the mirroring workflow targets a bucket that actually exists.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve account
+        id: account
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            https://api.cloudflare.com/client/v4/accounts > accounts.json
+          cat accounts.json | head -c 600
+          echo
+          id=$(python3 -c "
+          import json
+          d = json.load(open('accounts.json'))
+          if not d.get('success'):
+              print('API_ERROR', d.get('errors')); raise SystemExit(1)
+          accs = d['result']
+          if len(accs) != 1:
+              print('EXPECTED_ONE_ACCOUNT_GOT', len(accs)); raise SystemExit(1)
+          print(accs[0]['id'])
+          ")
+          echo "account_id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: List R2 buckets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+        run: |
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/r2/buckets" \
+            | python3 -c "
+          import json,sys
+          d = json.load(sys.stdin)
+          print('success:', d.get('success'))
+          for b in d.get('result') or []:
+              print('BUCKET:', b['name'])
+          "
