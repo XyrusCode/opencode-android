@@ -84,9 +84,10 @@ jobs:
         run: |
           set -euo pipefail
           key="opencode/_probe/probe.txt"
+          printf 'probe\n' > /tmp/probe-in
 
           echo "-> PUT"
-          echo "probe" | wrangler r2 object put "$BUCKET/$key" --file - --remote
+          wrangler r2 object put "$BUCKET/$key" --file /tmp/probe-in --remote
 
           echo "-> GET"
           wrangler r2 object get "$BUCKET/$key" --file /tmp/probe-out --remote
