@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose supplies the real theme; this exists so the manifest has
+         something valid to point at before the first frame is composed. -->
+    <style name="Theme.Opencode" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#FF101418</item>
+        <item name="android:navigationBarColor">#FF101418</item>
+        <item name="android:windowBackground">#FF101418</item>
+    </style>
+</resources>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The bridge is reached over plain ws:// on a LAN address, and Android has
+  blocked cleartext by default since API 28. Without this the connect fails on
+  the phone with no useful error.
+
+  Trade-off: this permits cleartext to any host, because <domain> entries match
+  hostnames only and cannot express a LAN range. The bridge itself authenticates
+  with a shared token and is normally bound to your own machine, so the exposure
+  is to your LAN rather than the internet. Tighten this to <domain> entries once
+  the bridge is reachable at a fixed hostname.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

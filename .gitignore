@@ -1,0 +1,13 @@
+# Gradle
+.gradle/
+build/
+local.properties
+.kotlin/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+
+# Generated knowledge graph (rebuilt by the graphify hook)
+graphify-out/
