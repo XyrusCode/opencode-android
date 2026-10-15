@@ -12,9 +12,6 @@ name: R2 Probe
 on:
   workflow_dispatch:
     inputs:
-      account_id:
-        description: Cloudflare account ID (shown on the R2 overview page)
-        required: true
       bucket:
         description: R2 bucket name
         required: true
@@ -36,13 +33,13 @@ jobs:
       - name: List buckets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account_id }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: wrangler r2 bucket list
 
       - name: Round trip a probe object
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account_id }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           BUCKET: ${{ inputs.bucket }}
         run: |
           set -euo pipefail
