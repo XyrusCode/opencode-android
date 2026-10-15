@@ -49,12 +49,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           version="${GITHUB_REF_NAME#v}"
-          notes=$(awk -v v="$version"
-            BEGIN { found = 0 }
-            /^## \[/ {
-              if (found) exit
-              if ($0 ~ ("^## \\[" v "\\]")) { found = 1; next }
-            }
+          # Build the heading pattern once as a plain string rather than trying
+          # to regex-escape brackets inside awk.
+          notes=$(awk -v heading="## [$version]" '
+            $0 == heading { found = 1; next }
+            /^## \[/ && found { exit }
             found { print }
           ' CHANGELOG.md)
           if [ -z "$notes" ]; then
