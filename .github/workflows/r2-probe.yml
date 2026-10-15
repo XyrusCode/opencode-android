@@ -30,11 +30,51 @@ jobs:
       - name: Install wrangler
         run: npm install -g wrangler
 
-      - name: List buckets
+      - name: Diagnose credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BUCKET: ${{ inputs.bucket }}
+        run: |
+          # Print shape, not values: a pasted secret often carries whitespace
+          # or quotes, which looks identical to a permissions failure.
+          python3 - <<'PY'
+          import os
+          acct = os.environ.get("ACCOUNT_ID", "")
+          tok = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+          print(f"account_id len={len(acct)} hex={acct.isalnum()} lower={acct.islower()}")
+          print(f"token len={len(tok)}")
+          PY
+
+      - name: Verify token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            https://api.cloudflare.com/client/v4/user/tokens/verify | head -c 500; echo
+
+      - name: Check account
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID" | head -c 600; echo
+
+      - name: Check bucket directly
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BUCKET: ${{ inputs.bucket }}
+        run: |
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/r2/buckets/$BUCKET" | head -c 600; echo
+
+      - name: List buckets via wrangler
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: wrangler r2 bucket list
+        run: wrangler r2 bucket list || true
 
       - name: Round trip a probe object
         env:
