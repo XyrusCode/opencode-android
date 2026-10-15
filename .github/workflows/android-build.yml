@@ -18,6 +18,12 @@ jobs:
     name: Build release APK
     runs-on: ubuntu-latest
 
+    env:
+      # One bucket for every XyrusCode product; the prefix separates them, so a
+      # new product needs no new bucket and no new domain.
+      R2_BUCKET: software-releases
+      R2_PREFIX: opencode/android
+
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +33,10 @@ jobs:
           java-version: "17"
 
       - uses: gradle/actions/setup-gradle@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --stacktrace
@@ -48,9 +58,10 @@ jobs:
         id: notes
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
+          set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          # Build the heading pattern once as a plain string rather than trying
-          # to regex-escape brackets inside awk.
+          # Build the heading as a plain string rather than regex-escaping
+          # brackets inside awk.
           notes=$(awk -v heading="## [$version]" '
             $0 == heading { found = 1; next }
             /^## \[/ && found { exit }
@@ -74,9 +85,63 @@ jobs:
             opencode companion app for Android.
 
             Install the APK on your phone, then start the bridge on your desktop
-            with `python -m bridge` and enter the desktop's IP on the pairing
+            with `opencode-bridge` and enter the desktop's IP on the pairing
             screen.
 
             **Note:** this APK is signed with the debug key so it is installable
             for testing. Uninstall any previous build before upgrading once a
             release key is in place.
+
+            ---
+            ## What's new in this version
+            ${{ steps.notes.outputs.notes }}
+
+      # Only after the APK has been built, verified and released. A plain push
+      # never reaches this step, and a failed build never gets here either.
+      - name: Mirror the APK to Cloudflare R2
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/release/app-release.apk
+          asset="opencode-${GITHUB_REF_NAME}.apk"
+
+          # Two keys on purpose. The versioned one is immutable and is what a
+          # changelog can link to. The latest one never changes, so a product
+          # page does not have to be edited at every release.
+          #
+          # --remote is required: without it wrangler writes to its local
+          # simulator, prints "Upload complete", and nothing reaches R2.
+          npx --yes wrangler@4 r2 object put \
+            "$R2_BUCKET/$R2_PREFIX/$GITHUB_REF_NAME/$asset" \
+            --file "$apk" --content-type application/vnd.android.package-archive --remote
+
+          npx --yes wrangler@4 r2 object put \
+            "$R2_BUCKET/$R2_PREFIX/latest/opencode.apk" \
+            --file "$apk" --content-type application/vnd.android.package-archive --remote
+
+      - name: Read the APK back out of R2
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          asset="opencode-${GITHUB_REF_NAME}.apk"
+
+          # A 200 from an upload is not proof the bytes landed intact. Pull the
+          # published object back and compare it to what was built.
+          npx --yes wrangler@4 r2 object get \
+            "$R2_BUCKET/$R2_PREFIX/$GITHUB_REF_NAME/$asset" \
+            --file "roundtrip-$asset" --remote
+
+          if ! cmp -s "app/build/outputs/apk/release/app-release.apk" "roundtrip-$asset"; then
+            echo "::error::the object in R2 is not byte identical to the built APK"
+            exit 1
+          fi
+
+          # The round-tripped file must still be a valid, signed APK.
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "roundtrip-$asset"
+          echo "R2 object matches the built APK and still verifies."
