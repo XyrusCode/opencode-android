@@ -62,8 +62,11 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           # Build the heading as a plain string rather than regex-escaping
           # brackets inside awk.
+          # Keep-a-Changelog headings carry a date ("## [0.2.3] - 2026-10-16"),
+          # so match on the heading as a prefix rather than an exact line. The
+          # closing bracket keeps "## [0.2.3]" from matching "## [0.2.30]".
           notes=$(awk -v heading="## [$version]" '
-            $0 == heading { found = 1; next }
+            index($0, heading) == 1 { found = 1; next }
             /^## \[/ && found { exit }
             found { print }
           ' CHANGELOG.md)
