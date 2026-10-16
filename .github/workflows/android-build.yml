@@ -98,15 +98,30 @@ jobs:
 
       # Only after the APK has been built, verified and released. A plain push
       # never reaches this step, and a failed build never gets here either.
-      - name: Mirror the APK to Cloudflare R2
+      #
+      # The published layout is what UpdateChecker fetches:
+      #   opencode/android/v<version>/opencode-<version>.apk
+      #   opencode/android/latest/opencode.apk
+      #   opencode/android/latest/version.json
+      - name: Mirror the APK and manifest to Cloudflare R2
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RELEASE_NOTES: ${{ steps.notes.outputs.notes }}
         run: |
           set -euo pipefail
           apk=app/build/outputs/apk/release/app-release.apk
-          asset="opencode-${GITHUB_REF_NAME}.apk"
+          version="${GITHUB_REF_NAME#v}"
+          asset="opencode-${version}.apk"
+
+          # The manifest the in-app updater reads. apkFiles maps ABI -> filename
+          # under the versioned directory. We ship one universal APK, so every
+          # ABI points at the same file. jq keeps multi-line release notes a
+          # valid JSON string instead of breaking the document.
+          jq -n --arg version "$version" --arg apk "$asset" --arg notes "$RELEASE_NOTES" \
+            '{version:$version, apkFiles:{arm64_v8a:$apk, armeabi_v7a:$apk, x86_64:$apk, universal:$apk}, releaseNotes:$notes}' \
+            > version.json
 
           # Two keys on purpose. The versioned one is immutable and is what a
           # changelog can link to. The latest one never changes, so a product
@@ -115,12 +130,16 @@ jobs:
           # --remote is required: without it wrangler writes to its local
           # simulator, prints "Upload complete", and nothing reaches R2.
           npx --yes wrangler@4 r2 object put \
-            "$R2_BUCKET/$R2_PREFIX/$GITHUB_REF_NAME/$asset" \
+            "$R2_BUCKET/$R2_PREFIX/v${version}/$asset" \
             --file "$apk" --content-type application/vnd.android.package-archive --remote
 
           npx --yes wrangler@4 r2 object put \
             "$R2_BUCKET/$R2_PREFIX/latest/opencode.apk" \
             --file "$apk" --content-type application/vnd.android.package-archive --remote
+
+          npx --yes wrangler@4 r2 object put \
+            "$R2_BUCKET/$R2_PREFIX/latest/version.json" \
+            --file version.json --content-type application/json --remote
 
       - name: Read the APK back out of R2
         if: startsWith(github.ref, 'refs/tags/v')
@@ -129,12 +148,13 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          asset="opencode-${GITHUB_REF_NAME}.apk"
+          version="${GITHUB_REF_NAME#v}"
+          asset="opencode-${version}.apk"
 
           # A 200 from an upload is not proof the bytes landed intact. Pull the
           # published object back and compare it to what was built.
           npx --yes wrangler@4 r2 object get \
-            "$R2_BUCKET/$R2_PREFIX/$GITHUB_REF_NAME/$asset" \
+            "$R2_BUCKET/$R2_PREFIX/v${version}/$asset" \
             --file "roundtrip-$asset" --remote
 
           if ! cmp -s "app/build/outputs/apk/release/app-release.apk" "roundtrip-$asset"; then

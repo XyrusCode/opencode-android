@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider roots: expose only the app-private `updates/` directory under
+     noBackupFiles, so installApk can hand a download to the system installer. -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <no-backup-path name="updates" path="updates" />
+</paths>
