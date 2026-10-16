@@ -6,6 +6,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -93,6 +94,50 @@ class BridgeClient(
                 .put("sessionID", sessionId)
                 .put("text", text),
         )
+
+    // --- Model / agent / project selection -------------------------------
+    // The bridge remembers these per-socket and pops them into the NEXT prompt
+    // (per-message override is the only setter opencode supports), so the
+    // ViewModel re-sends the active selection before every message.
+
+    fun selectModel(sessionId: String?, modelID: String, providerID: String) =
+        send(
+            JSONObject().put("type", "select_model").apply {
+                if (sessionId != null) put("sessionID", sessionId)
+                put("modelID", modelID)
+                put("providerID", providerID)
+            },
+        )
+
+    fun selectAgent(agent: String) =
+        send(JSONObject().put("type", "select_agent").put("agent", agent))
+
+    /** Remembered until the next create_session, which is where it applies. */
+    fun pickProject(worktree: String) =
+        send(JSONObject().put("type", "pick_project").put("worktree", worktree))
+
+    // --- Interactive prompt replies ----------------------------------------
+
+    /** reply is one of "once", "always", "reject". */
+    fun replyPermission(requestID: String, reply: String, message: String? = null) =
+        send(
+            JSONObject().put("type", "reply_permission").apply {
+                put("requestID", requestID)
+                put("reply", reply)
+                if (message != null) put("message", message)
+            },
+        )
+
+    /** answers is one list of selected labels per question, in order. */
+    fun replyQuestion(requestID: String, answers: List<List<String>>) {
+        val array = JSONArray()
+        answers.forEach { selected -> array.put(JSONArray(selected)) }
+        send(
+            JSONObject().put("type", "reply_question")
+                .put("requestID", requestID)
+                .put("answers", array),
+        )
+    }
 
     fun abort(sessionId: String) =
         send(JSONObject().put("type", "abort").put("sessionID", sessionId))

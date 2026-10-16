@@ -2,7 +2,13 @@ package com.xyrus.opencode
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.xyrus.opencode.bridge.Agent
 import com.xyrus.opencode.bridge.BridgeClient
+import com.xyrus.opencode.bridge.HistoryMessage
+import com.xyrus.opencode.bridge.PermissionPrompt
+import com.xyrus.opencode.bridge.Project
+import com.xyrus.opencode.bridge.Provider
+import com.xyrus.opencode.bridge.QuestionPrompt
 import com.xyrus.opencode.bridge.Session
 import com.xyrus.opencode.bridge.SessionMessage
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,12 +16,47 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 const val DEFAULT_AUTH_TOKEN = "opencode-2026-mobile-companion"
 const val DEFAULT_PORT = 9876
 
-/** One line in the conversation transcript. */
-data class TranscriptLine(val text: String, val fromUser: Boolean)
+/**
+ * One rendered entry in the transcript. The bridge forwards the assistant's work
+ * as structured parts (tool calls, files, snapshots, patches, errors), so the
+ * transcript is a mixed list rather than a list of plain strings.
+ */
+sealed interface TranscriptItem {
+    val id: String
+}
+
+/** A user or assistant text block. Streamed assistant text grows via [id]. */
+data class TextItem(
+    override val id: String,
+    val role: String,
+    val text: String,
+) : TranscriptItem
+
+/**
+ * A structured part rendered as a card: a tool call, a file, a snapshot diff, a
+ * patch, or an error. Fields are pre-flattened so the UI does no JSON digging.
+ */
+data class PartItem(
+    override val id: String,
+    val type: String,
+    val title: String,
+    val subtitle: String,
+    val body: String,
+    val state: String?,
+    val isError: Boolean,
+) : TranscriptItem
+
+/** The model the next message will use, plus a human label for the chip. */
+data class ModelChoice(
+    val modelID: String,
+    val providerID: String,
+    val label: String,
+)
 
 data class UiState(
     val host: String = "",
@@ -23,9 +64,22 @@ data class UiState(
     val connection: BridgeClient.State = BridgeClient.State.Disconnected,
     val sessions: List<Session> = emptyList(),
     val attachedSession: Session? = null,
-    val transcript: List<TranscriptLine> = emptyList(),
+    val transcript: List<TranscriptItem> = emptyList(),
     val streaming: Boolean = false,
     val error: String? = null,
+    // Catalogs for the picker sheets.
+    val providers: List<Provider> = emptyList(),
+    val agents: List<Agent> = emptyList(),
+    val projects: List<Project> = emptyList(),
+    // Active selection, re-sent before every prompt (the bridge pops it).
+    val selectedModel: ModelChoice? = null,
+    val selectedAgent: String? = null,
+    val selectedProject: Project? = null,
+    // What the bridge reports is currently active (informational).
+    val activeModel: ModelChoice? = null,
+    // Interactive prompts awaiting an answer from the phone.
+    val pendingPermission: PermissionPrompt? = null,
+    val pendingQuestion: QuestionPrompt? = null,
 ) {
     val isConnected get() = connection == BridgeClient.State.Ready
     val canSend get() = isConnected && attachedSession != null && !streaming
@@ -73,6 +127,8 @@ class BridgeViewModel : ViewModel() {
                 connection = BridgeClient.State.Disconnected,
                 attachedSession = null,
                 streaming = false,
+                pendingPermission = null,
+                pendingQuestion = null,
             )
         }
     }
@@ -85,24 +141,80 @@ class BridgeViewModel : ViewModel() {
                 attachedSession = session,
                 transcript = emptyList(),
                 error = null,
+                pendingPermission = null,
+                pendingQuestion = null,
             )
         }
         client?.attach(session.id)
     }
 
     fun createSession() {
-        _state.update { it.copy(attachedSession = null, transcript = emptyList()) }
+        // The project is remembered per-socket and consumed by the next create.
+        _state.value.selectedProject?.worktree?.let { client?.pickProject(it) }
+        _state.update {
+            it.copy(
+                attachedSession = null,
+                transcript = emptyList(),
+                pendingPermission = null,
+                pendingQuestion = null,
+            )
+        }
         client?.createSession("From phone")
     }
+
+    // --- Selection ---------------------------------------------------------
+
+    fun chooseModel(modelID: String, providerID: String, label: String) {
+        val choice = ModelChoice(modelID, providerID, label)
+        _state.update { it.copy(selectedModel = choice) }
+        // Send now so the bridge acks; send() re-sends before each prompt.
+        _state.value.attachedSession?.id?.let { client?.selectModel(it, modelID, providerID) }
+    }
+
+    fun chooseAgent(name: String) {
+        _state.update { it.copy(selectedAgent = name) }
+        client?.selectAgent(name)
+    }
+
+    fun chooseProject(project: Project) {
+        _state.update { it.copy(selectedProject = project) }
+        project.worktree?.let { client?.pickProject(it) }
+    }
+
+    // --- Interactive prompt replies ----------------------------------------
+
+    /** reply is one of "once", "always", "reject". */
+    fun replyPermission(reply: String, message: String? = null) {
+        val pending = _state.value.pendingPermission ?: return
+        val requestID = pending.requestID ?: return
+        client?.replyPermission(requestID, reply, message)
+        _state.update { it.copy(pendingPermission = null) }
+    }
+
+    fun replyQuestion(answers: List<List<String>>) {
+        val pending = _state.value.pendingQuestion ?: return
+        val requestID = pending.requestID ?: return
+        client?.replyQuestion(requestID, answers)
+        _state.update { it.copy(pendingQuestion = null) }
+    }
+
+    // --- Sending ------------------------------------------------------------
 
     fun send(text: String) {
         val trimmed = text.trim()
         val session = _state.value.attachedSession ?: return
         if (trimmed.isEmpty()) return
 
+        // The bridge pops the selection into the next prompt, so re-send the
+        // active model/agent right before every message.
+        _state.value.selectedModel?.let {
+            client?.selectModel(session.id, it.modelID, it.providerID)
+        }
+        _state.value.selectedAgent?.let { client?.selectAgent(it) }
+
         _state.update {
             it.copy(
-                transcript = it.transcript + TranscriptLine(trimmed, fromUser = true),
+                transcript = it.transcript + TextItem("user-${System.nanoTime()}", "user", trimmed),
                 streaming = true,
             )
         }
@@ -114,6 +226,8 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
+
+    // --- Frame handling ------------------------------------------------------
 
     private fun onConnectionChange(state: BridgeClient.State) {
         _state.update { it.copy(connection = state) }
@@ -133,15 +247,12 @@ class BridgeViewModel : ViewModel() {
                 _state.update { it.copy(connection = BridgeClient.State.Failed) }
             }
 
-            "sessions" -> when (frame.kind) {
-                "list" -> _state.update { it.copy(sessions = frame.sessions) }
-                "history" -> _state.update {
-                    it.copy(
-                        transcript = frame.lines.map { line ->
-                            TranscriptLine(line, fromUser = line.startsWith("you:"))
-                        },
-                    )
-                }
+            "sessions" -> if (frame.kind == "list") {
+                _state.update { it.copy(sessions = frame.sessions) }
+            }
+
+            "history" -> _state.update {
+                it.copy(transcript = buildTranscript(frame.messages))
             }
 
             "session" -> {
@@ -152,36 +263,101 @@ class BridgeViewModel : ViewModel() {
                             attachedSession = created,
                             transcript = emptyList(),
                             sessions = it.sessions + created,
+                            streaming = false,
                         )
                     }
+                } else if (frame.kind == "attached") {
+                    _state.update { it.copy(streaming = false) }
                 }
+            }
+
+            "providers" -> _state.update { it.copy(providers = frame.providers) }
+            "agents" -> _state.update { it.copy(agents = frame.agents) }
+            "projects" -> _state.update { it.copy(projects = frame.projects) }
+
+            "model" -> _state.update {
+                it.copy(
+                    activeModel = ModelChoice(
+                        modelID = frame.modelID.orEmpty(),
+                        providerID = frame.providerID.orEmpty(),
+                        label = frame.modelID.orEmpty(),
+                    ),
+                )
             }
 
             "status" -> if (frame.status == "busy") {
                 _state.update { it.copy(streaming = true) }
+            } else if (frame.status == "idle" || frame.status == "done") {
+                _state.update { it.copy(streaming = false) }
             }
 
             "output_delta" -> frame.delta?.takeIf { it.isNotEmpty() }?.let { delta ->
-                _state.update { current -> current.appendDelta(delta) }
+                _state.update { it.appendDelta(frame.messageID, delta) }
+            }
+
+            "part" -> frame.part?.let { part ->
+                _state.update { it.appendPart(part) }
             }
 
             "message_done" -> _state.update { it.copy(streaming = false) }
+
+            "permission_prompt" -> _state.update {
+                it.copy(pendingPermission = frame.permissionPrompt ?: it.pendingPermission)
+            }
+
+            "question_prompt" -> _state.update {
+                it.copy(pendingQuestion = frame.questionPrompt ?: it.pendingQuestion)
+            }
 
             "pong" -> Unit
         }
     }
 
+    /** Rebuild the transcript from a history frame's structured messages. */
+    private fun buildTranscript(messages: List<HistoryMessage>): List<TranscriptItem> =
+        messages.flatMap { message ->
+            val role = message.role ?: "assistant"
+            message.parts.map { part ->
+                if (part.optStringOrNullSafe("type") == "text") {
+                    TextItem(
+                        id = part.optStringOrNullSafe("id") ?: "text-${System.identityHashCode(part)}",
+                        role = role,
+                        text = part.optStringOrNullSafe("text").orEmpty(),
+                    )
+                } else {
+                    partFrom(part, role)
+                }
+            }
+        }
+
     /**
-     * opencode streams deltas for the message currently being written. Those
-     * belong on the last assistant line, not as new lines, so append to the tail
-     * while a turn is in flight.
+     * opencode streams assistant text as deltas keyed to a message. They belong
+     * on that message's text item, not as new entries, so append to the matching
+     * item while a turn is in flight.
      */
-    private fun UiState.appendDelta(delta: String): UiState {
-        val tail = transcript.lastOrNull()
-        return if (tail != null && !tail.fromUser) {
-            copy(transcript = transcript.dropLast(1) + tail.copy(text = tail.text + delta))
+    private fun UiState.appendDelta(messageID: String?, delta: String): UiState {
+        val id = messageID ?: "streaming"
+        val idx = transcript.indexOfFirst { it is TextItem && it.id == id }
+        return if (idx >= 0) {
+            val item = transcript[idx] as TextItem
+            copy(
+                transcript = transcript.toMutableList().also {
+                    it[idx] = item.copy(text = item.text + delta)
+                },
+            )
         } else {
-            copy(transcript = transcript + TranscriptLine(delta, fromUser = false))
+            copy(transcript = transcript + TextItem(id, "assistant", delta))
+        }
+    }
+
+    /** Upsert a structured part by its stable id (guards against duplicates). */
+    private fun UiState.appendPart(part: JSONObject): UiState {
+        val item = partFrom(part, role = "assistant")
+        val idx = transcript.indexOfFirst { it.id == item.id }
+        return if (idx >= 0) {
+            copy(transcript = transcript.toMutableList().also { it[idx] = item })
+        } else {
+            copy(transcript = transcript + item)
         }
     }
 
@@ -191,3 +367,73 @@ class BridgeViewModel : ViewModel() {
         super.onCleared()
     }
 }
+
+// --- Part normalization ------------------------------------------------------
+
+private fun JSONObject.optStringOrNullSafe(key: String): String? {
+    if (!has(key) || isNull(key)) return null
+    return optString(key).takeIf { it.isNotEmpty() }
+}
+
+/**
+ * Flatten one opencode part into renderable strings. Kept here so the UI stays
+ * declarative and does no JSON digging at draw time.
+ */
+private fun partFrom(part: JSONObject, role: String): PartItem {
+    val type = part.optStringOrNullSafe("type") ?: "part"
+    val id = part.optStringOrNullSafe("id") ?: "part-${System.identityHashCode(part)}"
+    val state = part.optStringOrNullSafe("state")
+    val errorText = part.optStringOrNullSafe("error")
+    val isError = errorText != null
+    return when (type) {
+        "tool" -> {
+            val tool = part.optStringOrNullSafe("tool") ?: "tool"
+            val input = part.optJSONObject("input")?.let { compact(it) }.orEmpty()
+            val output = part.optStringOrNullSafe("output")
+                ?: part.optStringOrNullSafe("result")
+                ?: errorText
+                ?: ""
+            PartItem(id, type, tool, input.take(120), output.take(BODY_LIMIT), state, isError)
+        }
+
+        "file" -> {
+            val filename = part.optStringOrNullSafe("filename")
+                ?: part.optStringOrNullSafe("filePath")
+                ?: "file"
+            val subtitle = part.optStringOrNullSafe("mime")
+                ?: part.optStringOrNullSafe("url")
+                ?: ""
+            PartItem(id, type, filename, subtitle.take(120), "", state, isError)
+        }
+
+        "snapshot", "patch" -> {
+            val diff = part.optStringOrNullSafe("patch")
+                ?: part.optStringOrNullSafe("diff")
+                ?: part.optStringOrNullSafe("text")
+                ?: ""
+            PartItem(
+                id, type, type.replaceFirstChar { it.uppercase() }, "",
+                diff.take(BODY_LIMIT), state, isError,
+            )
+        }
+
+        else -> {
+            val text = part.optStringOrNullSafe("text")
+                ?: part.optStringOrNullSafe("message")
+                ?: ""
+            PartItem(id, type, type, role, (if (isError) errorText else text).orEmpty().take(BODY_LIMIT), state, isError)
+        }
+    }
+}
+
+/** A short "k=v, k=v" preview of a tool input. */
+private fun compact(obj: JSONObject, limit: Int = 3): String {
+    val parts = mutableListOf<String>()
+    for (key in obj.keys()) {
+        if (parts.size >= limit) break
+        parts += "$key=${obj.opt(key)?.toString()?.take(40)}"
+    }
+    return parts.joinToString(", ")
+}
+
+private const val BODY_LIMIT = 6000
