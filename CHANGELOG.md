@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-10-16
+
+### Fixed
+- In-app updates failed with a signature/package error. Release builds use the
+  debug signing config and CI generated a fresh debug keystore every run, so no
+  two APKs shared a signature. CI now caches the keystore. The first install of
+  this build must be done manually (uninstall the previous app once); after that
+  the in-app updater works.
+
+### Added
+- A spinner on the connect button while the socket opens and authenticates.
+- Search in the model, agent and project pickers.
+- Project-first session list: sessions inside the selected project, grouped Today
+  and Older, and searchable by title.
+- The opencode wordmark shown when a new session has no messages yet.
+
 ## [0.2.3] - 2026-10-16
 
 ### Added
