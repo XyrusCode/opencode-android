@@ -34,6 +34,16 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # GitHub Actions generates a fresh ~/.android/debug.keystore on every run.
+      # Release builds use the debug signing config, so without this cache each CI
+      # APK gets a different signature and the app can never update over the
+      # previous one. Caching the key keeps every release on one signing identity.
+      - name: Cache the release signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: opencode-android-debug-keystore-v1
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

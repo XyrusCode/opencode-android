@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -54,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xyrus.opencode.BridgeViewModel
 import com.xyrus.opencode.ModelChoice
@@ -187,12 +189,21 @@ fun SessionScreen(viewModel: BridgeViewModel, modifier: Modifier = Modifier) {
                     .padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    "No messages yet. Send one to start.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "opencode",
+                        style = MaterialTheme.typography.displaySmall.copy(letterSpacing = 3.sp),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "New session. Send a message to begin.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
             return@Scaffold
         }
@@ -357,6 +368,18 @@ private fun PickerRow(
     }
 }
 
+@Composable
+private fun SheetSearchField(query: String, onQueryChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        placeholder = { Text("Search") },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ModelSheet(
@@ -365,26 +388,37 @@ private fun ModelSheet(
     onPick: (String, String, String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var query by remember { mutableStateOf("") }
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 480.dp)
-                .padding(horizontal = 16.dp),
-        ) {
-            providers.forEach { provider ->
-                item(key = "provider-${provider.id}") {
-                    SectionHeader(title = provider.name ?: provider.id.orEmpty())
-                }
-                items(provider.models, key = { "${provider.id}-${it.id}" }) { model ->
-                    val modelID = model.id.orEmpty()
-                    val providerID = model.providerID ?: provider.id.orEmpty()
-                    PickerRow(
-                        title = model.name ?: modelID,
-                        subtitle = providerID,
-                        selected = selected?.modelID == modelID && selected?.providerID == providerID,
-                        onClick = { onPick(modelID, providerID, model.name ?: modelID) },
-                    )
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            SheetSearchField(query, onQueryChange = { query = it })
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp),
+            ) {
+                providers.forEach { provider ->
+                    val models = provider.models.filter { model ->
+                        query.isBlank() ||
+                            (model.name ?: model.id.orEmpty()).contains(query, ignoreCase = true) ||
+                            model.id.orEmpty().contains(query, ignoreCase = true)
+                    }
+                    if (models.isNotEmpty()) {
+                        item(key = "provider-${provider.id}") {
+                            SectionHeader(title = provider.name ?: provider.id.orEmpty())
+                        }
+                        items(models, key = { "${provider.id}-${it.id}" }) { model ->
+                            val modelID = model.id.orEmpty()
+                            val providerID = model.providerID ?: provider.id.orEmpty()
+                            PickerRow(
+                                title = model.name ?: modelID,
+                                subtitle = providerID,
+                                selected = selected?.modelID == modelID &&
+                                    selected?.providerID == providerID,
+                                onClick = { onPick(modelID, providerID, model.name ?: modelID) },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -399,21 +433,31 @@ private fun AgentSheet(
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var query by remember { mutableStateOf("") }
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 480.dp)
-                .padding(horizontal = 16.dp),
-        ) {
-            items(agents, key = { it.name.orEmpty() }) { agent ->
-                val name = agent.name.orEmpty()
-                PickerRow(
-                    title = name,
-                    subtitle = agent.description,
-                    selected = selected == name,
-                    onClick = { onPick(name) },
-                )
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            SheetSearchField(query, onQueryChange = { query = it })
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp),
+            ) {
+                items(
+                    agents.filter { agent ->
+                        query.isBlank() ||
+                            agent.name.orEmpty().contains(query, ignoreCase = true) ||
+                            agent.description.orEmpty().contains(query, ignoreCase = true)
+                    },
+                    key = { it.name.orEmpty() },
+                ) { agent ->
+                    val name = agent.name.orEmpty()
+                    PickerRow(
+                        title = name,
+                        subtitle = agent.description,
+                        selected = selected == name,
+                        onClick = { onPick(name) },
+                    )
+                }
             }
         }
     }
@@ -427,20 +471,30 @@ private fun ProjectSheet(
     onPick: (Project) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var query by remember { mutableStateOf("") }
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 480.dp)
-                .padding(horizontal = 16.dp),
-        ) {
-            items(projects, key = { it.id.orEmpty() }) { project ->
-                PickerRow(
-                    title = project.name ?: project.id.orEmpty(),
-                    subtitle = project.worktree,
-                    selected = selected?.id == project.id,
-                    onClick = { onPick(project) },
-                )
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            SheetSearchField(query, onQueryChange = { query = it })
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp),
+            ) {
+                items(
+                    projects.filter { project ->
+                        query.isBlank() ||
+                            project.name.orEmpty().contains(query, ignoreCase = true) ||
+                            project.worktree.orEmpty().contains(query, ignoreCase = true)
+                    },
+                    key = { it.id.orEmpty() },
+                ) { project ->
+                    PickerRow(
+                        title = project.name ?: project.id.orEmpty(),
+                        subtitle = project.worktree,
+                        selected = selected?.id == project.id,
+                        onClick = { onPick(project) },
+                    )
+                }
             }
         }
     }

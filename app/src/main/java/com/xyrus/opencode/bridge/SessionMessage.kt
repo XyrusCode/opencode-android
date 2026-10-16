@@ -206,6 +206,8 @@ data class Session(
     val title: String,
     val directory: String?,
     val model: String?,
+    /** Epoch millis of the last update, used to group Today vs Older. */
+    val updated: Long? = null,
 ) {
     val subtitle: String
         get() = listOfNotNull(
@@ -219,6 +221,7 @@ data class Session(
             title = json.optString("title"),
             directory = json.optStringOrNull("directory"),
             model = json.optStringOrNull("model"),
+            updated = json.optLong("updated", 0L).takeIf { it > 0L },
         )
     }
 }
