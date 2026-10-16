@@ -13,11 +13,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -49,7 +51,11 @@ import com.xyrus.opencode.bridge.Session
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PairingScreen(viewModel: BridgeViewModel, modifier: Modifier = Modifier) {
+fun PairingScreen(
+    viewModel: BridgeViewModel,
+    onOpenUpdates: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -58,6 +64,11 @@ fun PairingScreen(viewModel: BridgeViewModel, modifier: Modifier = Modifier) {
         topBar = {
             TopAppBar(
                 title = { Text("opencode") },
+                actions = {
+                    IconButton(onClick = onOpenUpdates) {
+                        Icon(Icons.Default.Settings, contentDescription = "App updates")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                 ),
