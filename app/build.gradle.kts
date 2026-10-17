@@ -50,8 +50,8 @@ android {
         applicationId = "com.xyrus.opencode"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.5.1"
+        versionCode = 12
+        versionName = "0.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -122,6 +122,15 @@ dependencies {
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // QR scanning for pairing. The bundled model ships inside the APK, so there
+    // is no Play Services requirement and no model download at scan time; the
+    // "thin" Play Services artifact would fail on a device without them.
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("androidx.camera:camera-core:1.4.1")
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

@@ -98,6 +98,11 @@ class ServerStore(context: Context) {
         get() = prefs.getInt(KEY_BRIDGE_PORT, 9876)
         set(value) = prefs.edit().putInt(KEY_BRIDGE_PORT, value).apply()
 
+    /** Forget pairing credentials and saved addresses, keeping preferences. */
+    fun clearCache() {
+        prefs.edit().remove(KEY_LIST).remove(KEY_SELECTED).apply()
+    }
+
     private fun write(list: List<ServerConfig>) {
         val arr = JSONArray()
         list.forEach { arr.put(it.toJson()) }

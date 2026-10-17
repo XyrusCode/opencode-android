@@ -22,6 +22,7 @@ import com.xyrus.opencode.data.UpdateChecker
 import com.xyrus.opencode.ui.ConnectScreen
 import com.xyrus.opencode.ui.ConversationsDrawer
 import com.xyrus.opencode.ui.SessionScreen
+import com.xyrus.opencode.ui.SettingsScreen
 import com.xyrus.opencode.ui.UpdatesScreen
 import com.xyrus.opencode.ui.theme.OpencodeTheme
 import kotlinx.coroutines.launch
@@ -38,6 +39,7 @@ class MainActivity : ComponentActivity() {
                 val context = LocalContext.current
                 val checker = remember { UpdateChecker(context) }
                 var showUpdates by rememberSaveable { mutableStateOf(false) }
+                var showSettings by rememberSaveable { mutableStateOf(false) }
 
                 val drawerState = rememberDrawerState(DrawerValue.Closed)
                 val scope = rememberCoroutineScope()
@@ -53,13 +55,21 @@ class MainActivity : ComponentActivity() {
                                     scope.launch { drawerState.close() }
                                 },
                                 onOpenUpdates = {
-                                    showUpdates = true
                                     scope.launch { drawerState.close() }
+                                    showSettings = true
                                 },
                             )
                         },
                     ) {
                         when {
+                            showSettings -> SettingsScreen(
+                                onBack = { showSettings = false },
+                                onOpenUpdates = {
+                                    showSettings = false
+                                    showUpdates = true
+                                },
+                            )
+
                             showUpdates -> UpdatesScreen(
                                 checker = checker,
                                 onBack = { showUpdates = false },
@@ -72,7 +82,7 @@ class MainActivity : ComponentActivity() {
 
                             else -> ConnectScreen(
                                 viewModel = viewModel,
-                                onOpenUpdates = { showUpdates = true },
+                                onOpenUpdates = { showSettings = true },
                                 onOpenDrawer = { scope.launch { drawerState.open() } },
                             )
                         }

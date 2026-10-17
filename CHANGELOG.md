@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-17
+
+### Added
+- Scan the QR from `opencode pair` with the camera. The QR carries one pairing
+  code plus every address your machine answers on, so scanning is usually the
+  only step needed. The bundled decoder ships inside the app, so there is no
+  Play Services requirement and nothing to download first.
+- A real settings screen: your saved servers with which one is current, path
+  display, updates, clearing cached credentials, and app info.
+- Connecting now tries each address from that pairing until one answers,
+  preferring Tailscale, then the local network, then the remote tunnel. A phone
+  that can only reach the tunnel now connects instead of being told the server
+  is unreachable.
+
+### Changed
+- Add server is one screen with three ways in — scan the QR, type the code, or
+  use a host and password — because they are the same pairing underneath. The
+  exact commands to run are shown on the screen.
+- A refused pairing code now says the code was rejected rather than that the
+  address could not be reached; those are different problems.
+
 ## [0.5.1] - 2026-10-17
 
 ### Fixed

@@ -215,10 +215,26 @@ data class Session(
     val updated: Long? = null,
 ) {
     val subtitle: String
-        get() = listOfNotNull(
-            directory?.substringAfterLast('\\')?.substringAfterLast('/')?.takeIf { it.isNotBlank() },
-            model,
-        ).joinToString(" · ")
+        get() = listOfNotNull(shortDirectory(), model).joinToString(" · ")
+
+    /**
+     * The project folder, with the home directory collapsed when asked.
+     *
+     * "C:\Users\Xyrus\Desktop\XyrusCode\Video-Plucker" is a mouthful on a phone,
+     * so the home prefix becomes ~ and the rest is kept.
+     */
+    fun shortDirectory(home: String? = null): String? {
+        val dir = directory ?: return null
+        val base = dir.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
+        if (base.isBlank()) return null
+        val homePath = home?.trimEnd('/', '\\') ?: return base
+        return if (dir.startsWith(homePath, ignoreCase = true)) {
+            val tail = dir.substring(homePath.length).trimStart('/', '\\')
+            if (tail.isBlank()) "~" else "~/$tail"
+        } else {
+            base
+        }
+    }
 
     companion object {
         fun parse(json: JSONObject) = Session(
