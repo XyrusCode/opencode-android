@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-17
+
+### Fixed
+- Project navigation actually works now. The list showed opencode worktrees
+  ("global", git-hash ids) that matched no sessions, so selecting one looked
+  empty. Projects are derived from each session's real working directory.
+- The app no longer draws under the status and navigation bars; content is
+  constrained to the safe area like ChatGPT and Claude.
+
+### Changed
+- Renamed the app to **OpenCompanion** (it pairs to opencode rather than being
+  opencode); the opencode wordmark and icon remain as the paired-tool branding.
+- Navigation drawer is now Antigravity-style: New Conversation, search, and real
+  projects that expand to reveal their sessions with relative ages.
+- The composer project picker lists real project directories and creates new
+  sessions in the picked project.
+
 ## [0.3.0] - 2026-10-17
 
 ### Changed
