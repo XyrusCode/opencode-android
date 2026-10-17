@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-10-17
+
+### Fixed
+- In-app updates could never work: every release was signed with a different
+  key, so Android treated each build as a separate app. Builds were cached as
+  `~/.android/debug.keystore`, but Gradle resolves that directory from the SDK
+  home, so the cache never found or saved anything and each run invented a new
+  key. The key now comes from a repository secret, written before each build, and
+  a release build without it fails instead of quietly signing differently.
+  **You will need to uninstall the current app once before this version will
+  install.** After that, updates work normally.
+- Pairing could fail for reasons the screen never explained. A remote address
+  typed without a scheme was forced to `http://`, which an HTTPS-only remote
+  cannot serve. Addresses now default to HTTPS, staying on HTTP only for
+  loopback and private LAN hosts. Pasting the whole pair link works in either
+  field, and a rejected code is now distinguished from an unreachable address.
+
 ## [0.5.0] - 2026-10-17
 
 ### Fixed

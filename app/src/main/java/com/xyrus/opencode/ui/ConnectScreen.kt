@@ -51,7 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.xyrus.opencode.BridgeViewModel
 import com.xyrus.opencode.opencode.AuthKind
-import com.xyrus.opencode.opencode.PairCredential
+import com.xyrus.opencode.opencode.PairLink
 import com.xyrus.opencode.opencode.ServerConfig
 import com.xyrus.opencode.opencode.ServerStore
 import com.xyrus.opencode.ui.theme.Accent
@@ -279,10 +279,6 @@ private fun AddServerDialog(
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    // `opencode pair` prints http://HOST:PORT/auth/connect/CODE. Accept the whole
-    // URL or just the code, since both are what people paste.
-    fun extractCode(raw: String): String =
-        raw.substringAfterLast("/auth/connect/", raw.trim()).trim()
 
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
@@ -356,29 +352,44 @@ private fun AddServerDialog(
             TextButton(
                 enabled = !busy && url.isNotBlank() && secret.isNotBlank(),
                 onClick = {
-                    val base = url.trim().let {
-                        if (it.startsWith("http://") || it.startsWith("https://")) it
-                        else "http://$it"
+                    val parts = PairLink.resolve(addressInput = url, codeInput = secret)
+                    if (parts == null) {
+                        error = "Enter an address and a pairing code"
+                        return@TextButton
                     }
+                    val base = parts.base
                     busy = true
                     error = null
                     scope.launch {
                         if (kind == AuthKind.Pairing) {
-                            val token = exchangePairingCode(base, extractCode(secret))
-                            if (token == null) {
-                                busy = false
-                                error = "Could not pair. Check the address and that the code is fresh."
-                            } else {
-                                busy = false
-                                onSave(
-                                    ServerConfig(
-                                        id = UUID.randomUUID().toString(),
-                                        name = name.ifBlank { base.substringAfter("//") },
-                                        baseUrl = base,
-                                        secret = token,
-                                        kind = AuthKind.Pairing,
+                            // Distinguish "cannot reach it" from "code not
+                            // accepted"; both used to read as a dead button.
+                            when (val result = exchangePairingCode(base, parts.code)) {
+                                is PairResult.Token -> {
+                                    busy = false
+                                    onSave(
+                                        ServerConfig(
+                                            id = UUID.randomUUID().toString(),
+                                            name = name.ifBlank { base.substringAfter("//") },
+                                            baseUrl = base,
+                                            secret = result.token,
+                                            kind = AuthKind.Pairing,
+                                        )
                                     )
-                                )
+                                }
+
+                                PairResult.Rejected -> {
+                                    busy = false
+                                    error = "That code was rejected. Codes work once and " +
+                                        "last 5 minutes, so run opencode pair again."
+                                }
+
+                                is PairResult.Unreachable -> {
+                                    busy = false
+                                    error = "Could not reach $base. Check the address and " +
+                                        "that your phone can see it (same Wi-Fi, or the " +
+                                        "tunnel from pair --remote)."
+                                }
                             }
                         } else {
                             busy = false
@@ -406,26 +417,44 @@ private fun AddServerDialog(
  * Trade a one-time pairing code for a credential.
  *
  * opencode returns `{"token": "..."}` and expects that token as the Basic auth
- * password. Returns null on any failure so the caller can explain.
+ * password. The three outcomes are kept apart so the message can say whether the
+ * address was wrong or the code was stale, which are very different problems.
  */
-private suspend fun exchangePairingCode(baseUrl: String, code: String): String? =
+private sealed interface PairResult {
+    data class Token(val token: String) : PairResult
+    object Rejected : PairResult
+    data class Unreachable(val detail: String) : PairResult
+}
+
+private suspend fun exchangePairingCode(baseUrl: String, code: String): PairResult =
     withContext(Dispatchers.IO) {
-        if (code.isBlank()) return@withContext null
         val client = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .build()
-        runCatching {
+        try {
             val request = Request.Builder()
                 .url("${baseUrl.trimEnd('/')}/auth/connect/$code")
                 .get()
                 .build()
             client.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val body = resp.body?.string().orEmpty()
-                org.json.JSONObject(body).optString("token").ifEmpty { null }
+                if (!resp.isSuccessful) {
+                    // 401/404 means the server answered but would not accept the
+                    // code; anything else here is a wrong address.
+                    return@withContext when (resp.code) {
+                        401, 403, 404, 410 -> PairResult.Rejected
+                        else -> PairResult.Unreachable("HTTP ${resp.code}")
+                    }
+                }
+                val token = org.json.JSONObject(resp.body?.string().orEmpty())
+                    .optString("token")
+                if (token.isEmpty()) PairResult.Rejected else PairResult.Token(token)
             }
-        }.getOrNull()
+        } catch (e: java.io.IOException) {
+            PairResult.Unreachable(e.message ?: "no route to host")
+        } catch (e: Exception) {
+            PairResult.Unreachable(e.message ?: "unknown error")
+        }
     }
 
 @Composable

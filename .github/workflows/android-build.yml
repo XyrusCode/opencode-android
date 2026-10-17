@@ -34,15 +34,45 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # GitHub Actions generates a fresh ~/.android/debug.keystore on every run.
-      # Release builds use the debug signing config, so without this cache each CI
-      # APK gets a different signature and the app can never update over the
-      # previous one. Caching the key keeps every release on one signing identity.
-      - name: Cache the release signing key
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: opencode-android-debug-keystore-v1
+      # One signing key for every release, taken from repo secrets rather than a
+      # cache. The earlier cache of ~/.android/debug.keystore silently never
+      # worked: gradle resolves that directory from ANDROID_SDK_HOME, so the path
+      # did not exist, nothing was ever saved, and each release shipped with a
+      # different signing identity. Android then treated every build as a
+      # separate app, so in-app updates could never install over the previous
+      # version. A secret cannot expire or miss quietly, and build.gradle.kts
+      # fails the build outright if the key is absent.
+      - name: Restore the release signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD are not set; refusing to build a release that cannot be updated in place"
+            exit 1
+          fi
+          store="$RUNNER_TEMP/opencode-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$store"
+
+          # Prove the key is readable before relying on it, so a truncated or
+          # corrupted secret fails here rather than at apksigner.
+          keytool -list -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias opencode >/dev/null
+
+          # printf rather than a heredoc: no indentation surprises inside a YAML
+          # block scalar. Written to the repo root because that is where
+          # build.gradle.kts looks for it.
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=opencode\nkeyPassword=%s\n' \
+            "$store" "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEYSTORE_PASSWORD" \
+            > keystore.properties
+
+          # The identity actually signing this build, so a rotation is obvious
+          # in the log instead of only on a user's phone.
+          cert_sha=$(keytool -list -v -keystore "$store" -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias opencode | awk -F': ' '/SHA256:/ {print $2}')
+          echo "Signing with SHA256 ${cert_sha}"
+          echo "SIGNING_CERT_SHA256=${cert_sha}" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
         with:

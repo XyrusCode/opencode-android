@@ -12,3 +12,9 @@ captures/
 # Generated knowledge graph (rebuilt by the graphify hook)
 graphify-out/
 run_tests.bat
+
+# Release signing. CI writes keystore.properties from repo secrets; it holds the
+# key path and passwords and must never be committed.
+keystore.properties
+*.jks
+*.keystore
