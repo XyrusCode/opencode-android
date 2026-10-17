@@ -30,6 +30,7 @@ data class SessionMessage(
     // below).
     val lines: List<String> = emptyList(),
     val sessions: List<Session> = emptyList(),
+    /** Carries the session itself on "session" frames (created / renamed). */
     val session: Session? = null,
     // Rich-rendering and selection payloads.
     val providers: List<Provider> = emptyList(),

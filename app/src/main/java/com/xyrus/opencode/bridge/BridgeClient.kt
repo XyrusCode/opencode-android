@@ -142,6 +142,17 @@ class BridgeClient(
     fun abort(sessionId: String) =
         send(JSONObject().put("type", "abort").put("sessionID", sessionId))
 
+    fun renameSession(sessionId: String, title: String) =
+        send(
+            JSONObject().put("type", "rename_session")
+                .put("sessionID", sessionId)
+                .put("title", title),
+        )
+
+    /** Permanent: opencode drops the session and its messages. */
+    fun deleteSession(sessionId: String) =
+        send(JSONObject().put("type", "delete_session").put("sessionID", sessionId))
+
     fun disconnect() {
         socket?.close(1000, "client disconnect")
         socket = null

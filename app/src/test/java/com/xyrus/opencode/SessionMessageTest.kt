@@ -70,6 +70,31 @@ class SessionMessageTest {
     }
 
     @Test
+    fun `parses a renamed session frame so the list can update in place`() {
+        val raw = """
+            {"type":"session","kind":"renamed",
+             "session":{"id":"ses_1","title":"after","directory":"C:\\work\\repo",
+                        "model":"m1","provider":"opencode","agent":"build"}}
+        """.trimIndent()
+
+        val frame = SessionMessage.parse(raw)
+        assertEquals("renamed", frame.kind)
+        val session = frame.session
+        assertNotNull(session)
+        assertEquals("after", session!!.title)
+        assertEquals("opencode", session.provider)
+        assertEquals("build", session.agent)
+    }
+
+    @Test
+    fun `parses a deleted session frame by id`() {
+        val frame = SessionMessage.parse("""{"type":"session","kind":"deleted","sessionID":"ses_9"}""")
+        assertEquals("deleted", frame.kind)
+        assertEquals("ses_9", frame.sessionID)
+        assertNull(frame.session)
+    }
+
+    @Test
     fun `session without a preset model leaves provider and agent null`() {
         val raw = """
             {"type":"sessions","kind":"list","sessions":[

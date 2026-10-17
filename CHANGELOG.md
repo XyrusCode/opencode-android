@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-10-17
+
+### Added
+- Sessions can be renamed and deleted from the drawer. Each session row has a
+  menu with Rename (inline text field) and Delete (with a confirmation, since
+  opencode removes it and its messages for good). Renames and deletes are
+  broadcast, so every paired phone updates without re-fetching the list.
+- The updater now asks for the permissions it silently needed. Android 13+
+  requires a notification permission before download progress or the
+  ready-to-install notice can be shown, and Android 8+ refuses to install an APK
+  until you allow the app to install unknown apps. Previously the download
+  succeeded and tapping Install did nothing, which is why no install prompt ever
+  appeared.
+
 ## [0.4.2] - 2026-10-17
 
 ### Fixed

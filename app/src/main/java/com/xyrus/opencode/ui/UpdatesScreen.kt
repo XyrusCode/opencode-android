@@ -35,6 +35,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -70,9 +75,26 @@ fun UpdatesScreen(
     var info by remember { mutableStateOf<UpdateInfo?>(null) }
     var notesExpanded by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
+    // Re-read whenever the screen recomposes: the user leaves for Settings, grants
+    // the permission and comes back, so the button must flip on its own.
+    var installGranted by remember { mutableStateOf(checker.canRequestPackageInstalls()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ -> installGranted = checker.canRequestPackageInstalls() }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val progress by checker.downloadProgress.collectAsStateWithLifecycle()
     val downloaded by checker.downloadedApk.collectAsStateWithLifecycle()
+
+    // Ask for POST_NOTIFICATIONS before downloading, so the progress and
+    // ready-to-install notices are actually delivered on Android 13+.
+    val notifLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) installError = "Notifications are off, so update progress will not be shown"
+    }
 
     val installed = remember {
         runCatching {
@@ -140,14 +162,55 @@ fun UpdatesScreen(
                         Spacer(Modifier.height(14.dp))
                         val apk = downloaded
                         if (apk != null) {
-                            Button(
-                                onClick = { if (!checker.installApk(apk)) installError = "Could not open the installer" },
-                                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Bg),
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Install update") }
+                            // Without the "install unknown apps" grant the installer
+                            // intent is silently ignored, so the tap looked broken.
+                            // Check it and offer the Settings screen instead of
+                            // firing an intent that does nothing.
+                            if (installGranted) {
+                                Button(
+                                    onClick = {
+                                        if (!checker.installApk(apk)) {
+                                            installError = "Could not open the installer"
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Accent,
+                                        contentColor = Bg,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Install update") }
+                            } else {
+                                Button(
+                                    onClick = {
+                                        runCatching {
+                                            context.startActivity(checker.unknownSourcesSettingsIntent())
+                                        }.onFailure {
+                                            installError = "Open Settings > Apps > Special app access > Install unknown apps"
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Accent,
+                                        contentColor = Bg,
+                                    ),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Allow installation") }
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Android needs your permission to install updates. " +
+                                        "Turn on \"Install unknown apps\" for OpenCompanion, " +
+                                        "then tap Install.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextDim,
+                                )
+                            }
                         } else {
                             Button(
-                                onClick = { scope.launch { checker.downloadApk(update) } },
+                                onClick = {
+                                if (checker.needsNotificationPermission()) {
+                                    notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                                scope.launch { checker.downloadApk(update) }
+                            },
                                 enabled = progress == null,
                                 colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Bg),
                                 modifier = Modifier.fillMaxWidth(),

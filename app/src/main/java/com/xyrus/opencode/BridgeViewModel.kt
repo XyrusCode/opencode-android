@@ -154,6 +154,30 @@ class BridgeViewModel : ViewModel() {
 
     fun loadSessions() = client?.listSessions()
 
+    fun renameSession(sessionId: String, title: String) {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
+        // Apply locally right away; the broadcast confirms for other phones.
+        _state.update { state ->
+            state.copy(
+                sessions = state.sessions.map {
+                    if (it.id == sessionId) it.copy(title = trimmed) else it
+                },
+            )
+        }
+        client?.renameSession(sessionId, trimmed)
+    }
+
+    fun deleteSession(sessionId: String) {
+        _state.update { state ->
+            state.copy(
+                sessions = state.sessions.filterNot { it.id == sessionId },
+                attachedSession = state.attachedSession?.takeIf { it.id != sessionId },
+            )
+        }
+        client?.deleteSession(sessionId)
+    }
+
     fun attach(session: Session) {
         // Carry the session's own model/agent over: send() re-pushes the
         // selection before every prompt, so a prompt never goes out model-less
@@ -298,6 +322,32 @@ class BridgeViewModel : ViewModel() {
                     }
                 } else if (frame.kind == "attached") {
                     _state.update { it.copy(streaming = false) }
+                } else if (frame.kind == "renamed" && created != null) {
+                    // Broadcast, so every paired phone converges without re-fetching.
+                    _state.update { state ->
+                        state.copy(
+                            sessions = state.sessions.map { if (it.id == created.id) created else it },
+                            // Keep the open screen's title honest if it is this one.
+                            attachedSession = state.attachedSession
+                                ?.takeIf { it.id == created.id }
+                                ?.let { created },
+                        )
+                    }
+                } else if (frame.kind == "deleted") {
+                    frame.sessionID?.let { gone ->
+                        _state.update { state ->
+                            state.copy(
+                                sessions = state.sessions.filterNot { it.id == gone },
+                                attachedSession = state.attachedSession?.takeIf { it.id != gone },
+                                transcript = if (state.attachedSession?.id == gone) {
+                                    emptyList()
+                                } else {
+                                    state.transcript
+                                },
+                                streaming = false,
+                            )
+                        }
+                    }
                 }
             }
 

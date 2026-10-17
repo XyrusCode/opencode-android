@@ -3,6 +3,7 @@ package com.xyrus.opencode.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,10 +19,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
@@ -47,6 +55,7 @@ import com.xyrus.opencode.bridge.Session
 import com.xyrus.opencode.ui.theme.Accent
 import com.xyrus.opencode.ui.theme.Bg
 import com.xyrus.opencode.ui.theme.BorderCol
+import com.xyrus.opencode.ui.theme.Err
 import com.xyrus.opencode.ui.theme.Panel2
 import com.xyrus.opencode.ui.theme.PlexMono
 import com.xyrus.opencode.ui.theme.TextCol
@@ -120,6 +129,9 @@ fun ConversationsDrawer(
     val state by viewModel.state.collectAsStateWithLifecycle()
     var search by rememberSaveable { mutableStateOf("") }
     val expanded = remember { mutableStateListOf<String>() }
+    var menuFor by remember { mutableStateOf<Session?>(null) }
+    var renaming by remember { mutableStateOf<Session?>(null) }
+    var deleting by remember { mutableStateOf<Session?>(null) }
 
     val groups: List<Pair<RealProject, List<Session>>> = remember(state.sessions, search) {
         groupSessionsByProject(state.sessions, search)
@@ -246,6 +258,40 @@ fun ConversationsDrawer(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = TextDim,
                                 )
+                                Spacer(Modifier.width(4.dp))
+                                // Overflow menu: rename / delete without a long-press.
+                                Box {
+                                    IconButton(
+                                        onClick = { menuFor = session },
+                                        modifier = Modifier.size(28.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.MoreVert,
+                                            contentDescription = "Session options",
+                                            tint = TextDim,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = menuFor?.id == session.id,
+                                        onDismissRequest = { menuFor = null },
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Rename") },
+                                            onClick = {
+                                                menuFor = null
+                                                renaming = session
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Delete", color = Err) },
+                                            onClick = {
+                                                menuFor = null
+                                                deleting = session
+                                            },
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -278,6 +324,59 @@ fun ConversationsDrawer(
                         .clip(RoundedCornerShape(8.dp))
                         .clickable { viewModel.disconnect() }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+
+            // Rename: a plain text field, since titles are short and free-form.
+            renaming?.let { target ->
+                var draft by remember(target.id) { mutableStateOf(target.title) }
+                AlertDialog(
+                    onDismissRequest = { renaming = null },
+                    title = { Text("Rename session", color = TextCol) },
+                    text = {
+                        OutlinedTextField(
+                            value = draft,
+                            onValueChange = { draft = it },
+                            singleLine = true,
+                            colors = transparentFieldColors(),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextCol),
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            viewModel.renameSession(target.id, draft)
+                            renaming = null
+                        }) { Text("Save", color = Accent) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { renaming = null }) { Text("Cancel", color = TextDim) }
+                    },
+                    containerColor = Panel2,
+                )
+            }
+
+            // Delete is permanent on opencode's side, so make that explicit.
+            deleting?.let { target ->
+                AlertDialog(
+                    onDismissRequest = { deleting = null },
+                    title = { Text("Delete session?", color = TextCol) },
+                    text = {
+                        Text(
+                            "\"${target.title}\" and its messages are removed for good. This cannot be undone.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            viewModel.deleteSession(target.id)
+                            deleting = null
+                        }) { Text("Delete", color = Err) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { deleting = null }) { Text("Cancel", color = TextDim) }
+                    },
+                    containerColor = Panel2,
                 )
             }
         }

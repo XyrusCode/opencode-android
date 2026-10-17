@@ -4,6 +4,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.provider.Settings
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
@@ -227,6 +228,36 @@ class UpdateChecker(private val context: Context) {
             false
         }
     }
+
+    /**
+     * True when we may prompt for "install unknown apps".
+     *
+     * Android 8+ blocks installing an APK until the user grants this per-app. The
+     * install intent below silently does nothing without it, which is why the
+     * updater used to look broken: the download succeeded, the tap did nothing.
+     * There is no Intent for this grant, so the caller must send the user to
+     * Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES.
+     */
+    fun canRequestPackageInstalls(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+
+    /** Intent that opens the per-app "allow from this source" screen. */
+    @Suppress("UnspecifiedImmutableFlag")
+    fun unknownSourcesSettingsIntent(): Intent =
+        Intent(
+            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            android.net.Uri.parse("package:${context.packageName}"),
+        )
+
+    /** Android 13+ needs POST_NOTIFICATIONS or the update notice is never shown. */
+    fun needsNotificationPermission(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
 
     /** Notify the user an update is ready to install. */
     fun notifyUpdateReady(info: UpdateInfo) {

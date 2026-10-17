@@ -73,6 +73,34 @@ class ProjectGroupingTest {
     }
 
     @Test
+    fun `a renamed session replaces its entry in the list`() {
+        // Renames arrive broadcast, so the drawer must swap the row in place
+        // rather than dropping it or showing a duplicate.
+        val sessions = listOf(
+            session("a", "C:\\work\\Repo", title = "before"),
+            session("b", "C:\\work\\Repo", title = "other"),
+        )
+        val renamed = sessions[0].copy(title = "after")
+
+        val merged = sessions.map { if (it.id == renamed.id) renamed else it }
+
+        assertEquals(listOf("after", "other"), merged.map { it.title })
+        assertEquals(2, groupSessionsByProject(merged).single().second.size)
+    }
+
+    @Test
+    fun `a deleted session disappears from the list`() {
+        val sessions = listOf(
+            session("a", "C:\\work\\Repo", title = "keep"),
+            session("b", "C:\\work\\Repo", title = "doomed"),
+        )
+
+        val remaining = groupSessionsByProject(sessions.filterNot { it.id == "b" })
+
+        assertEquals(listOf("keep"), remaining.single().second.map { it.title })
+    }
+
+    @Test
     fun `temp scratch sessions never become projects`() {
         val groups = groupSessionsByProject(
             listOf(
