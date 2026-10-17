@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-17
+
+### Fixed
+- The in-app updater had no visible Download button: the screen did not scroll
+  and the changelog pushed the button below the fold. It now scrolls, the primary
+  action sits above a truncated (tap to expand) changelog, and a copyable direct
+  download link is included as a fallback.
+- Installing an update did nothing on Android 11+ (package-visibility made the
+  installer lookup fail); the updater now launches the installer directly and
+  reports a real error instead of failing silently.
+- The drawer no longer shows throwaway sessions that ran in temp directories.
+
+### Changed
+- The bridge now sends up to 50 sessions spanning every project (previously 25,
+  all scoped to the bridge's own working directory), so the drawer lists your real
+  projects with their sessions and you can continue existing work.
+
 ## [0.4.0] - 2026-10-17
 
 ### Fixed
