@@ -66,12 +66,13 @@ import com.xyrus.opencode.BridgeViewModel
 import com.xyrus.opencode.ModelChoice
 import com.xyrus.opencode.PartItem
 import com.xyrus.opencode.PickerTarget
+import com.xyrus.opencode.RealProject
+import com.xyrus.opencode.realProjects
 import com.xyrus.opencode.TextItem
 import com.xyrus.opencode.TranscriptItem
 import com.xyrus.opencode.UiState
 import com.xyrus.opencode.bridge.Agent
 import com.xyrus.opencode.bridge.PermissionPrompt
-import com.xyrus.opencode.bridge.Project
 import com.xyrus.opencode.bridge.Provider
 import com.xyrus.opencode.bridge.QuestionPrompt
 import com.xyrus.opencode.ui.components.GlassButton
@@ -195,9 +196,9 @@ fun SessionScreen(
             onDismiss = { viewModel.showPicker(null) },
         )
         PickerTarget.Project -> ProjectSheet(
-            projects = state.projects,
-            selected = state.selectedProject,
-            onPick = { viewModel.chooseProject(it); viewModel.showPicker(null) },
+            projects = realProjects(state.sessions),
+            selectedDir = state.selectedProjectDir,
+            onPick = { viewModel.chooseProjectDir(it.directory); viewModel.showPicker(null) },
             onDismiss = { viewModel.showPicker(null) },
         )
         null -> Unit
@@ -279,6 +280,10 @@ private fun PartCard(item: PartItem) {
     }
 }
 
+/** Display name for a project directory path. */
+private fun dirName(dir: String): String =
+    dir.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
+
 private fun partIcon(type: String) = when (type) {
     "tool" -> Icons.Filled.Build
     "file" -> Icons.AutoMirrored.Filled.InsertDriveFile
@@ -346,7 +351,7 @@ private fun Composer(
         ) {
             ComposerChip(state.selectedModel?.label ?: "Model", onOpenModel)
             ComposerChip(state.selectedAgent ?: "Agent", onOpenAgent)
-            ComposerChip(state.selectedProject?.name ?: "Project", onOpenProject)
+            ComposerChip(state.selectedProjectDir?.let { dirName(it) }?.takeIf { it.isNotBlank() } ?: "Project", onOpenProject)
         }
     }
 }
@@ -445,14 +450,14 @@ private fun AgentSheet(agents: List<Agent>, selected: String?, onPick: (String) 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProjectSheet(projects: List<Project>, selected: Project?, onPick: (Project) -> Unit, onDismiss: () -> Unit) {
+private fun ProjectSheet(projects: List<RealProject>, selectedDir: String?, onPick: (RealProject) -> Unit, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Panel) {
         Column(Modifier.padding(horizontal = 16.dp)) {
             SheetSearchField(query, onQueryChange = { query = it })
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
-                items(projects.filter { query.isBlank() || it.name.orEmpty().contains(query, true) || it.worktree.orEmpty().contains(query, true) }, key = { it.id.orEmpty() }) { project ->
-                    PickerRow(project.name ?: project.id.orEmpty(), project.worktree, selected?.id == project.id) { onPick(project) }
+                items(projects.filter { query.isBlank() || it.name.contains(query, true) || it.directory.contains(query, true) }, key = { it.directory }) { project ->
+                    PickerRow(project.name, project.directory, selectedDir == project.directory) { onPick(project) }
                 }
             }
         }

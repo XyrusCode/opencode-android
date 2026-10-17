@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">opencode</string>
+    <string name="app_name">OpenCompanion</string>
     <string name="update_channel_name">App updates</string>
-    <string name="update_ready_title">opencode update ready</string>
+    <string name="update_ready_title">OpenCompanion update ready</string>
     <string name="update_ready_text">Version %1$s is ready to install. Tap to install.</string>
 </resources>

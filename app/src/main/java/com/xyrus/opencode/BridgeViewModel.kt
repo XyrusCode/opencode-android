@@ -54,6 +54,20 @@ data class PartItem(
 /** Which composer picker sheet is open (null = none). */
 enum class PickerTarget { Model, Agent, Project }
 
+/**
+ * A real project, derived from the sessions' own working directories. The bridge's
+ * `/project` catalog only exposes opencode worktrees (e.g. "global" and git-hash ids),
+ * which are meaningless for navigation, so the UI groups sessions by their real cwd.
+ */
+data class RealProject(val name: String, val directory: String)
+
+fun realProjects(sessions: List<Session>): List<RealProject> =
+    sessions.mapNotNull { s ->
+        s.directory?.takeIf { it.isNotBlank() }?.let { dir ->
+            RealProject(dir.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\'), dir)
+        }
+    }.distinctBy { it.directory }.sortedBy { it.name.lowercase() }
+
 /** The model the next message will use, plus a human label for the chip. */
 data class ModelChoice(
     val modelID: String,
@@ -77,7 +91,7 @@ data class UiState(
     // Active selection, re-sent before every prompt (the bridge pops it).
     val selectedModel: ModelChoice? = null,
     val selectedAgent: String? = null,
-    val selectedProject: Project? = null,
+    val selectedProjectDir: String? = null,
     // What the bridge reports is currently active (informational).
     val activeModel: ModelChoice? = null,
     // Interactive prompts awaiting an answer from the phone.
@@ -154,8 +168,8 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun createSession() {
-        // The project is remembered per-socket and consumed by the next create.
-        _state.value.selectedProject?.worktree?.let { client?.pickProject(it) }
+        // The project directory is remembered per-socket and consumed by the next create.
+        _state.value.selectedProjectDir?.let { client?.pickProject(it) }
         _state.update {
             it.copy(
                 attachedSession = null,
@@ -181,9 +195,9 @@ class BridgeViewModel : ViewModel() {
         client?.selectAgent(name)
     }
 
-    fun chooseProject(project: Project) {
-        _state.update { it.copy(selectedProject = project) }
-        project.worktree?.let { client?.pickProject(it) }
+    fun chooseProjectDir(directory: String) {
+        _state.update { it.copy(selectedProjectDir = directory) }
+        client?.pickProject(directory)
     }
 
     // --- Interactive prompt replies ----------------------------------------
