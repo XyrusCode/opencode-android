@@ -11,3 +11,4 @@ captures/
 
 # Generated knowledge graph (rebuilt by the graphify hook)
 graphify-out/
+run_tests.bat
