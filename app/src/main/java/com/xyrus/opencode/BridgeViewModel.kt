@@ -51,6 +51,9 @@ data class PartItem(
     val isError: Boolean,
 ) : TranscriptItem
 
+/** Which composer picker sheet is open (null = none). */
+enum class PickerTarget { Model, Agent, Project }
+
 /** The model the next message will use, plus a human label for the chip. */
 data class ModelChoice(
     val modelID: String,
@@ -80,6 +83,8 @@ data class UiState(
     // Interactive prompts awaiting an answer from the phone.
     val pendingPermission: PermissionPrompt? = null,
     val pendingQuestion: QuestionPrompt? = null,
+    // Which composer picker sheet is open.
+    val openPicker: PickerTarget? = null,
 ) {
     val isConnected get() = connection == BridgeClient.State.Ready
     val canSend get() = isConnected && attachedSession != null && !streaming
@@ -226,6 +231,9 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
+
+    /** Open (or close, with null) a composer picker sheet. */
+    fun showPicker(target: PickerTarget?) = _state.update { it.copy(openPicker = target) }
 
     // --- Frame handling ------------------------------------------------------
 

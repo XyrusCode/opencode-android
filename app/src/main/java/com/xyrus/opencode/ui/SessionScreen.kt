@@ -10,37 +10,42 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Difference
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,363 +65,355 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xyrus.opencode.BridgeViewModel
 import com.xyrus.opencode.ModelChoice
 import com.xyrus.opencode.PartItem
+import com.xyrus.opencode.PickerTarget
 import com.xyrus.opencode.TextItem
 import com.xyrus.opencode.TranscriptItem
+import com.xyrus.opencode.UiState
 import com.xyrus.opencode.bridge.Agent
 import com.xyrus.opencode.bridge.PermissionPrompt
 import com.xyrus.opencode.bridge.Project
 import com.xyrus.opencode.bridge.Provider
 import com.xyrus.opencode.bridge.QuestionPrompt
 import com.xyrus.opencode.ui.components.GlassButton
-import com.xyrus.opencode.ui.components.GlassCard
 import com.xyrus.opencode.ui.components.GlowButton
 import com.xyrus.opencode.ui.components.SectionHeader
 import com.xyrus.opencode.ui.theme.Accent
+import com.xyrus.opencode.ui.theme.Bg
+import com.xyrus.opencode.ui.theme.BorderCol
+import com.xyrus.opencode.ui.theme.Panel
+import com.xyrus.opencode.ui.theme.Panel2
+import com.xyrus.opencode.ui.theme.PlexMono
+import com.xyrus.opencode.ui.theme.TextCol
+import com.xyrus.opencode.ui.theme.TextDim
 
-private enum class Picker { Model, Agent, Project }
+/** The opencode wordmark, shown centered when a session has no messages. */
+@Composable
+private fun Wordmark(size: Int = 34) {
+    Text(
+        text = "opencode",
+        style = MaterialTheme.typography.displaySmall.copy(letterSpacing = 3.sp),
+        fontFamily = PlexMono,
+        fontWeight = FontWeight.SemiBold,
+        color = TextCol.copy(alpha = 0.85f),
+        modifier = Modifier,
+    )
+}
 
-/** Attached-session view: rich transcript, pickers, and interactive prompts. */
+/** Attached-session chat surface: transcript plus a pinned composer. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionScreen(viewModel: BridgeViewModel, modifier: Modifier = Modifier) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val listState = rememberLazyListState()
     var draft by rememberSaveable { mutableStateOf("") }
-    var picker by remember { mutableStateOf<Picker?>(null) }
+    val listState = rememberLazyListState()
 
-    // Follow the stream as it grows, the way a terminal would.
-    LaunchedEffect(state.transcript.size) {
-        if (state.transcript.isNotEmpty()) {
-            listState.animateScrollToItem(state.transcript.lastIndex)
-        }
+    LaunchedEffect(state.transcript.size, state.transcript.lastOrNull()?.let { (it as? TextItem)?.text?.length }) {
+        if (state.transcript.isNotEmpty()) listState.animateScrollToItem(state.transcript.lastIndex)
     }
 
     Scaffold(
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Bg,
         topBar = {
-            Column {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                state.attachedSession?.title ?: "Session",
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            if (state.streaming) {
-                                Text(
-                                    "working…",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = viewModel::disconnect) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                    ),
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    AssistChip(
-                        onClick = { picker = Picker.Model },
-                        label = {
-                            Text(
-                                state.selectedModel?.label
-                                    ?: state.activeModel?.label
-                                    ?: "Model",
-                            )
-                        },
-                    )
-                    AssistChip(
-                        onClick = { picker = Picker.Agent },
-                        label = { Text(state.selectedAgent ?: "Agent") },
-                    )
-                    AssistChip(
-                        onClick = { picker = Picker.Project },
-                        label = { Text(state.selectedProject?.name ?: "Project") },
-                    )
-                }
-            }
-        },
-        bottomBar = {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .imePadding()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, start = 4.dp, end = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    placeholder = { Text("Message opencode") },
-                    modifier = Modifier.weight(1f),
-                    maxLines = 4,
-                )
-                IconButton(
-                    onClick = {
-                        if (state.streaming) viewModel.abort() else {
-                            viewModel.send(draft)
-                            draft = ""
-                        }
-                    },
-                    enabled = state.streaming || (state.canSend && draft.isNotBlank()),
-                ) {
+                IconButton(onClick = viewModel::disconnect) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDim)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        state.attachedSession?.title ?: "opencode",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextCol,
+                        maxLines = 1,
+                    )
                     if (state.streaming) {
-                        Icon(Icons.Filled.Stop, contentDescription = "Stop")
-                    } else {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                        Text("working…", style = MaterialTheme.typography.bodySmall, color = Accent)
                     }
                 }
             }
         },
+        bottomBar = {
+            Composer(
+                draft = draft,
+                onDraftChange = { draft = it },
+                state = state,
+                onSend = { viewModel.send(draft); draft = "" },
+                onStop = viewModel::abort,
+                onOpenModel = { viewModel.showPicker(PickerTarget.Model) },
+                onOpenAgent = { viewModel.showPicker(PickerTarget.Agent) },
+                onOpenProject = { viewModel.showPicker(PickerTarget.Project) },
+            )
+        },
     ) { padding ->
         if (state.transcript.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Wordmark()
+                    Spacer(Modifier.padding(6.dp))
                     Text(
-                        text = "opencode",
-                        style = MaterialTheme.typography.displaySmall.copy(letterSpacing = 3.sp),
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        text = "New session. Send a message to begin.",
+                        "New session",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
+                        color = TextDim,
                     )
                 }
             }
             return@Scaffold
         }
-
         LazyColumn(
             state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(state.transcript, key = { it.id }) { item ->
                 when (item) {
-                    is TextItem -> TextRow(item)
-                    is PartItem -> PartRow(item)
+                    is TextItem -> if (item.role == "user") UserBubble(item) else AssistantText(item)
+                    is PartItem -> PartCard(item)
                 }
             }
         }
     }
 
-    when (picker) {
-        Picker.Model -> ModelSheet(
+    when (state.openPicker) {
+        PickerTarget.Model -> ModelSheet(
             providers = state.providers,
             selected = state.selectedModel,
-            onPick = { model, provider, label ->
-                viewModel.chooseModel(model, provider, label)
-                picker = null
-            },
-            onDismiss = { picker = null },
+            onPick = { m, p, label -> viewModel.chooseModel(m, p, label); viewModel.showPicker(null) },
+            onDismiss = { viewModel.showPicker(null) },
         )
-
-        Picker.Agent -> AgentSheet(
+        PickerTarget.Agent -> AgentSheet(
             agents = state.agents,
             selected = state.selectedAgent,
-            onPick = { viewModel.chooseAgent(it); picker = null },
-            onDismiss = { picker = null },
+            onPick = { viewModel.chooseAgent(it); viewModel.showPicker(null) },
+            onDismiss = { viewModel.showPicker(null) },
         )
-
-        Picker.Project -> ProjectSheet(
+        PickerTarget.Project -> ProjectSheet(
             projects = state.projects,
             selected = state.selectedProject,
-            onPick = { viewModel.chooseProject(it); picker = null },
-            onDismiss = { picker = null },
+            onPick = { viewModel.chooseProject(it); viewModel.showPicker(null) },
+            onDismiss = { viewModel.showPicker(null) },
         )
-
         null -> Unit
     }
 
-    state.pendingPermission?.let { prompt ->
-        PermissionDialog(prompt) { reply -> viewModel.replyPermission(reply) }
-    }
-
-    state.pendingQuestion?.let { prompt ->
-        QuestionDialog(prompt) { answers -> viewModel.replyQuestion(answers) }
-    }
+    state.pendingPermission?.let { PermissionDialog(it) { r -> viewModel.replyPermission(r) } }
+    state.pendingQuestion?.let { QuestionDialog(it) { a -> viewModel.replyQuestion(a) } }
 }
 
-// --- Transcript rows ---------------------------------------------------------
+// --- Transcript -------------------------------------------------------------
 
 @Composable
-private fun TextRow(item: TextItem) {
-    val isUser = item.role == "user"
-    Column(Modifier.fillMaxWidth()) {
-        Text(
-            text = if (isUser) "you" else "opencode",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+private fun UserBubble(item: TextItem) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Text(
             text = item.text,
             style = MaterialTheme.typography.bodyMedium,
-            color = if (isUser) Accent else MaterialTheme.colorScheme.onBackground,
+            color = TextCol,
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Panel2)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
         )
     }
 }
 
 @Composable
-private fun PartRow(item: PartItem) {
+private fun AssistantText(item: TextItem) {
+    ChatMarkdown(text = item.text, modifier = Modifier.fillMaxWidth())
+}
+
+@Composable
+private fun PartCard(item: PartItem) {
     var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
-    GlassCard(modifier = Modifier.fillMaxWidth()) {
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Panel)
+            .border(1.dp, BorderCol, shape)
+            .clickable { expanded = !expanded }
+            .padding(12.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (item.isError) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                )
-                if (item.subtitle.isNotBlank()) {
-                    Text(
-                        text = item.subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            Icon(partIcon(item.type), contentDescription = null, tint = if (item.isError) MaterialTheme.colorScheme.error else Accent, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                item.title,
+                style = MaterialTheme.typography.labelLarge,
+                color = TextCol,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+            )
             if (item.state == "running" || item.state == "pending") {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                )
-            } else if (item.isError) {
-                Text(
-                    "error",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Accent)
+            } else {
+                Icon(Icons.Filled.ExpandMore, contentDescription = null, tint = TextDim, modifier = Modifier.size(16.dp))
             }
         }
+        if (item.subtitle.isNotBlank()) {
+            Spacer(Modifier.padding(top = 4.dp))
+            Text(item.subtitle, style = MaterialTheme.typography.bodySmall, color = TextDim, maxLines = 1)
+        }
         if (item.body.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            val body = if (expanded) item.body else item.body.take(180)
-            Text(
-                text = if (expanded || item.body.length <= 180) body else "$body…",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clickable { expanded = !expanded },
-            )
+            Spacer(Modifier.padding(top = 6.dp))
+            if (expanded) {
+                ChatMarkdown(text = item.body, modifier = Modifier.fillMaxWidth())
+            } else {
+                Text(
+                    item.body.take(160),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextDim,
+                    maxLines = 3,
+                )
+            }
         }
     }
 }
 
-// --- Picker sheets -----------------------------------------------------------
+private fun partIcon(type: String) = when (type) {
+    "tool" -> Icons.Filled.Build
+    "file" -> Icons.AutoMirrored.Filled.InsertDriveFile
+    "patch", "snapshot" -> Icons.Filled.Difference
+    else -> Icons.AutoMirrored.Filled.Article
+}
+
+// --- Composer ---------------------------------------------------------------
 
 @Composable
-private fun PickerRow(
-    title: String,
-    subtitle: String?,
-    selected: Boolean,
-    onClick: () -> Unit,
+private fun Composer(
+    draft: String,
+    onDraftChange: (String) -> Unit,
+    state: UiState,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+    onOpenModel: () -> Unit,
+    onOpenAgent: () -> Unit,
+    onOpenProject: () -> Unit,
 ) {
+    val shape = RoundedCornerShape(22.dp)
+    Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(Panel)
+                .border(1.dp, BorderCol, shape)
+                .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                TextField(
+                    value = draft,
+                    onValueChange = onDraftChange,
+                    placeholder = { Text("Ask anything, / for commands, @ for context…", color = TextDim, maxLines = 1) },
+                    modifier = Modifier.weight(1f),
+                    maxLines = 5,
+                    colors = transparentFieldColors(),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextCol),
+                )
+                Spacer(Modifier.width(6.dp))
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(if (state.canSend || state.streaming) Accent else Panel2)
+                        .clickable(enabled = state.streaming || (state.canSend && draft.isNotBlank())) {
+                            if (state.streaming) onStop() else onSend()
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (state.streaming) {
+                        Icon(Icons.Filled.Stop, contentDescription = "Stop", tint = Bg, modifier = Modifier.size(18.dp))
+                    } else {
+                        Icon(Icons.Filled.ArrowUpward, contentDescription = "Send", tint = if (state.canSend) Bg else TextDim, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+        }
+        // opencode's mode chips, attached under the composer.
+        Row(
+            Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ComposerChip(state.selectedModel?.label ?: "Model", onOpenModel)
+            ComposerChip(state.selectedAgent ?: "Agent", onOpenAgent)
+            ComposerChip(state.selectedProject?.name ?: "Project", onOpenProject)
+        }
+    }
+}
+
+@Composable
+private fun ComposerChip(label: String, onClick: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable(onClick = onClick)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = TextDim, maxLines = 1)
+        Icon(Icons.Filled.ExpandMore, contentDescription = null, tint = TextDim, modifier = Modifier.size(14.dp))
+    }
+}
+
+@Composable
+private fun transparentFieldColors() = TextFieldDefaults.colors(
+    focusedContainerColor = Color.Transparent,
+    unfocusedContainerColor = Color.Transparent,
+    focusedIndicatorColor = Color.Transparent,
+    unfocusedIndicatorColor = Color.Transparent,
+    cursorColor = Accent,
+)
+
+// --- Picker sheets (with search) ---------------------------------------------
+
+@Composable
+private fun PickerRow(title: String, subtitle: String?, selected: Boolean, onClick: () -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (selected) Accent else MaterialTheme.colorScheme.onSurface,
-            )
+            Text(title, style = MaterialTheme.typography.bodyMedium, color = if (selected) Accent else TextCol, maxLines = 1)
             if (!subtitle.isNullOrBlank()) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = TextDim, maxLines = 1)
             }
         }
-        if (selected) {
-            Icon(Icons.Filled.Check, contentDescription = "selected", tint = Accent)
-        }
+        if (selected) Icon(Icons.Filled.Check, contentDescription = "selected", tint = Accent, modifier = Modifier.size(18.dp))
     }
 }
 
 @Composable
 private fun SheetSearchField(query: String, onQueryChange: (String) -> Unit) {
-    OutlinedTextField(
+    TextField(
         value = query,
         onValueChange = onQueryChange,
-        placeholder = { Text("Search") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        placeholder = { Text("Search", color = TextDim) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextDim) },
         singleLine = true,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        modifier = Modifier.fillMaxWidth(),
+        colors = transparentFieldColors(),
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextCol),
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ModelSheet(
-    providers: List<Provider>,
-    selected: ModelChoice?,
-    onPick: (String, String, String) -> Unit,
-    onDismiss: () -> Unit,
-) {
+private fun ModelSheet(providers: List<Provider>, selected: ModelChoice?, onPick: (String, String, String) -> Unit, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Panel) {
         Column(Modifier.padding(horizontal = 16.dp)) {
             SheetSearchField(query, onQueryChange = { query = it })
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 440.dp),
-            ) {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
                 providers.forEach { provider ->
-                    val models = provider.models.filter { model ->
-                        query.isBlank() ||
-                            (model.name ?: model.id.orEmpty()).contains(query, ignoreCase = true) ||
-                            model.id.orEmpty().contains(query, ignoreCase = true)
+                    val models = provider.models.filter {
+                        query.isBlank() || (it.name ?: it.id.orEmpty()).contains(query, true) || it.id.orEmpty().contains(query, true)
                     }
                     if (models.isNotEmpty()) {
-                        item(key = "provider-${provider.id}") {
-                            SectionHeader(title = provider.name ?: provider.id.orEmpty())
-                        }
+                        item(key = "p-${provider.id}") { SectionHeader(title = provider.name ?: provider.id.orEmpty()) }
                         items(models, key = { "${provider.id}-${it.id}" }) { model ->
                             val modelID = model.id.orEmpty()
                             val providerID = model.providerID ?: provider.id.orEmpty()
-                            PickerRow(
-                                title = model.name ?: modelID,
-                                subtitle = providerID,
-                                selected = selected?.modelID == modelID &&
-                                    selected?.providerID == providerID,
-                                onClick = { onPick(modelID, providerID, model.name ?: modelID) },
-                            )
+                            PickerRow(model.name ?: modelID, providerID, selected?.modelID == modelID && selected?.providerID == providerID) { onPick(modelID, providerID, model.name ?: modelID) }
                         }
                     }
                 }
@@ -427,36 +424,15 @@ private fun ModelSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AgentSheet(
-    agents: List<Agent>,
-    selected: String?,
-    onPick: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
+private fun AgentSheet(agents: List<Agent>, selected: String?, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Panel) {
         Column(Modifier.padding(horizontal = 16.dp)) {
             SheetSearchField(query, onQueryChange = { query = it })
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 440.dp),
-            ) {
-                items(
-                    agents.filter { agent ->
-                        query.isBlank() ||
-                            agent.name.orEmpty().contains(query, ignoreCase = true) ||
-                            agent.description.orEmpty().contains(query, ignoreCase = true)
-                    },
-                    key = { it.name.orEmpty() },
-                ) { agent ->
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
+                items(agents.filter { query.isBlank() || it.name.orEmpty().contains(query, true) || it.description.orEmpty().contains(query, true) }, key = { it.name.orEmpty() }) { agent ->
                     val name = agent.name.orEmpty()
-                    PickerRow(
-                        title = name,
-                        subtitle = agent.description,
-                        selected = selected == name,
-                        onClick = { onPick(name) },
-                    )
+                    PickerRow(name, agent.description, selected == name) { onPick(name) }
                 }
             }
         }
@@ -465,35 +441,14 @@ private fun AgentSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProjectSheet(
-    projects: List<Project>,
-    selected: Project?,
-    onPick: (Project) -> Unit,
-    onDismiss: () -> Unit,
-) {
+private fun ProjectSheet(projects: List<Project>, selected: Project?, onPick: (Project) -> Unit, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Panel) {
         Column(Modifier.padding(horizontal = 16.dp)) {
             SheetSearchField(query, onQueryChange = { query = it })
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 440.dp),
-            ) {
-                items(
-                    projects.filter { project ->
-                        query.isBlank() ||
-                            project.name.orEmpty().contains(query, ignoreCase = true) ||
-                            project.worktree.orEmpty().contains(query, ignoreCase = true)
-                    },
-                    key = { it.id.orEmpty() },
-                ) { project ->
-                    PickerRow(
-                        title = project.name ?: project.id.orEmpty(),
-                        subtitle = project.worktree,
-                        selected = selected?.id == project.id,
-                        onClick = { onPick(project) },
-                    )
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
+                items(projects.filter { query.isBlank() || it.name.orEmpty().contains(query, true) || it.worktree.orEmpty().contains(query, true) }, key = { it.id.orEmpty() }) { project ->
+                    PickerRow(project.name ?: project.id.orEmpty(), project.worktree, selected?.id == project.id) { onPick(project) }
                 }
             }
         }
@@ -506,103 +461,63 @@ private fun ProjectSheet(
 private fun PermissionDialog(prompt: PermissionPrompt, onReply: (String) -> Unit) {
     AlertDialog(
         onDismissRequest = { onReply("reject") },
-        title = { Text(prompt.permission ?: "Permission requested") },
+        containerColor = Panel,
+        title = { Text(prompt.permission ?: "Permission requested", color = TextCol) },
         text = {
             Column {
-                Text(
-                    "opencode wants to run a tool.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                Text("opencode wants to run a tool.", style = MaterialTheme.typography.bodyMedium, color = TextCol)
                 if (prompt.patterns.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    prompt.patterns.forEach { pattern ->
-                        Text(
-                            "• $pattern",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Spacer(Modifier.padding(top = 8.dp))
+                    prompt.patterns.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = TextDim) }
                 }
             }
         },
-        confirmButton = {
-            GlowButton("Allow once", onClick = { onReply("once") })
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GlassButton("Reject", onClick = { onReply("reject") })
-                GlassButton("Always", onClick = { onReply("always") })
-            }
-        },
+        confirmButton = { GlowButton("Allow once", onClick = { onReply("once") }) },
+        dismissButton = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassButton("Reject", onClick = { onReply("reject") })
+            GlassButton("Always", onClick = { onReply("always") })
+        } },
     )
 }
 
 @Composable
 private fun QuestionDialog(prompt: QuestionPrompt, onSubmit: (List<List<String>>) -> Unit) {
-    var selections by remember(prompt.requestID) {
-        mutableStateOf(prompt.questions.map { emptySet<String>() })
-    }
+    var selections by remember(prompt.requestID) { mutableStateOf(prompt.questions.map { emptySet<String>() }) }
     val ready = selections.all { it.isNotEmpty() }
-
     AlertDialog(
         onDismissRequest = {},
-        title = { Text("opencode has a question") },
+        containerColor = Panel,
+        title = { Text("opencode has a question", color = TextCol) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 prompt.questions.forEachIndexed { qi, question ->
-                    if (qi > 0) Spacer(Modifier.height(12.dp))
-                    question.header?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Accent,
-                        )
-                    }
-                    question.question?.let {
-                        Text(it, style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Spacer(Modifier.height(4.dp))
+                    if (qi > 0) Spacer(Modifier.padding(top = 12.dp))
+                    question.header?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = Accent) }
+                    question.question?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = TextCol) }
+                    Spacer(Modifier.padding(top = 4.dp))
                     question.options.forEach { option ->
                         val label = option.label ?: return@forEach
                         val checked = label in selections[qi]
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selections = selections.mapIndexed { i, set ->
-                                        if (i != qi) {
-                                            set
-                                        } else if (question.multiple == true) {
-                                            if (label in set) set - label else set + label
-                                        } else {
-                                            setOf(label)
-                                        }
-                                    }
+                            Modifier.fillMaxWidth().clickable {
+                                selections = selections.mapIndexed { i, set ->
+                                    if (i != qi) set else if (question.multiple == true) { if (label in set) set - label else set + label } else setOf(label)
                                 }
-                                .padding(vertical = 6.dp),
+                            }.padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            val boxColor = if (checked) Accent else Color.Transparent
-                            val borderColor = if (checked) Accent else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
                             Box(
-                                modifier = Modifier
-                                    .size(18.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(boxColor)
-                                    .border(1.dp, borderColor, RoundedCornerShape(4.dp)),
+                                Modifier.size(18.dp).clip(RoundedCornerShape(4.dp))
+                                    .background(if (checked) Accent else Color.Transparent)
+                                    .border(1.dp, if (checked) Accent else TextDim, RoundedCornerShape(4.dp)),
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text(label, style = MaterialTheme.typography.bodyMedium)
+                            Text(label, style = MaterialTheme.typography.bodyMedium, color = TextCol)
                         }
                     }
                 }
             }
         },
-        confirmButton = {
-            GlowButton("Submit", onClick = { onSubmit(selections.map { it.toList() }) }, enabled = ready)
-        },
+        confirmButton = { GlowButton("Submit", onClick = { onSubmit(selections.map { it.toList() }) }, enabled = ready) },
     )
 }
