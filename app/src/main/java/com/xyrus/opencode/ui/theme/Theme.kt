@@ -10,6 +10,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -21,28 +22,40 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.xyrus.opencode.R
 
-// Refined Apple-inspired dark palette (mirrors Video-Plucker's red-accent glass UI)
-val Bg = Color(0xFF0C0D0F)
-val Panel = Color(0xFF1C1C1E)
-val Panel2 = Color(0xFF2C2C2E)
-val BorderCol = Color(0xFF3A3A3C)
-val TextCol = Color(0xFFF5F5F7)
-val TextDim = Color(0x99F5F5F7) // 60% opacity text
-val Accent = Color(0xFFFF2D55) // Apple system red (branded app)
-val AccentDim = Color(0xFFBF1A3D)
-val Ok = Color(0xFF30D158) // Apple system green
-val Warn = Color(0xFFFF9F0A) // Apple system orange
+// opencode brand palette (see the opencode DESIGN.md). Warm near-black canvas,
+// cream ink, peach primary + purple secondary. Monospace-first typography.
 
-val AccentGlow = Color(0xFFFF375F)
-val AccentSoft = Color(0x1AFF2D55) // 10% opacity
-val AccentSoftStrong = Color(0x33FF2D55) // 20% opacity
-val GlassSurface = Color(0xB31C1C1E) // 70% opacity panel
-val GlassBorder = Color(0x1AFFFFFF) // 10% white
-val OkGlow = Color(0xFF34C759)
-val WarnGlow = Color(0xFFFFCC02)
+val Bg = Color(0xFF0F0D0D) // warm canvas (app background)
+val Panel = Color(0xFF201D1D) // cards / composer surface — the brand ink
+val Panel2 = Color(0xFF2A2525) // elevated surfaces, user bubble
+val BorderCol = Color(0xFF332E2E) // hairline border
+val TextCol = Color(0xFFF1ECEC) // cream ink — primary text
+val TextDim = Color(0xFF9A9898) // muted / ash — secondary text
+
+val Accent = Color(0xFFFAB283) // peach — primary accent (brand primary)
+val AccentDim = Color(0xFFC98A5E)
+val Secondary = Color(0xFF9D7CD8) // purple — secondary accent
+val Ok = Color(0xFF7FD88F) // success green
+val Warn = Color(0xFFF5A742) // warning amber
+val Err = Color(0xFFE06C75) // error red
+val Info = Color(0xFF56B6C2)
+
+// Derived / accent aliases used by the component library (kept for compatibility).
+val AccentGlow = Color(0xFFFFC9A3) // light peach for gradients
+val AccentSoft = Color(0x1AFAB283) // 10% peach
+val AccentSoftStrong = Color(0x33FAB283) // 20% peach
+val GlassSurface = Color(0xFF201D1D)
+val GlassBorder = Color(0x1AF1ECEC) // 10% cream hairline
+val OkGlow = Ok
+val WarnGlow = Warn
 
 val AccentGradientHorizontal = Brush.horizontalGradient(
     colors = listOf(Accent, AccentGlow),
@@ -54,7 +67,14 @@ val AccentGradientDiagonal = Brush.linearGradient(
     colors = listOf(Accent, AccentGlow, Accent),
 )
 val GlassGradient = Brush.verticalGradient(
-    colors = listOf(GlassSurface, GlassSurface.copy(alpha = 0.85f)),
+    colors = listOf(GlassSurface, Panel),
+)
+
+/** Brand monospace (IBM Plex Mono — the free stand-in for the commercial Berkeley Mono). */
+val PlexMono = FontFamily(
+    Font(R.font.ibm_plex_mono_regular, FontWeight.Normal),
+    Font(R.font.ibm_plex_mono_medium, FontWeight.Medium),
+    Font(R.font.ibm_plex_mono_semibold, FontWeight.SemiBold),
 )
 
 /** Critically damped spring — the default for all UI motion. */
@@ -62,10 +82,36 @@ val MotionSpring = spring<Float>(dampingRatio = 1f, stiffness = Spring.Stiffness
 /** Slight bounce, reserved for flicks/drags. */
 val MomentumSpring = spring<Float>(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
 
+private fun plex(size: Int, line: Int, weight: FontWeight = FontWeight.Normal) = TextStyle(
+    fontFamily = PlexMono,
+    fontWeight = weight,
+    fontSize = size.sp,
+    lineHeight = line.sp,
+)
+
+private val OpencodeTypography = Typography(
+    displayLarge = plex(48, 56, FontWeight.SemiBold),
+    displayMedium = plex(40, 48, FontWeight.SemiBold),
+    displaySmall = plex(34, 42, FontWeight.SemiBold),
+    headlineLarge = plex(30, 38, FontWeight.SemiBold),
+    headlineMedium = plex(26, 34, FontWeight.SemiBold),
+    headlineSmall = plex(22, 30, FontWeight.SemiBold),
+    titleLarge = plex(20, 28, FontWeight.Medium),
+    titleMedium = plex(16, 24, FontWeight.Medium),
+    titleSmall = plex(14, 20, FontWeight.Medium),
+    bodyLarge = plex(15, 24),
+    bodyMedium = plex(14, 22),
+    bodySmall = plex(13, 20),
+    labelLarge = plex(14, 20, FontWeight.Medium),
+    labelMedium = plex(12, 16, FontWeight.Medium),
+    labelSmall = plex(11, 16, FontWeight.Medium),
+)
+
 private val OpencodeColors = darkColorScheme(
     primary = Accent,
-    onPrimary = Color.White,
-    secondary = AccentDim,
+    onPrimary = Bg,
+    secondary = Secondary,
+    onSecondary = Bg,
     background = Bg,
     onBackground = TextCol,
     surface = Panel,
@@ -73,7 +119,7 @@ private val OpencodeColors = darkColorScheme(
     surfaceVariant = Panel2,
     onSurfaceVariant = TextDim,
     outline = BorderCol,
-    error = Warn,
+    error = Err,
 )
 
 @Composable
@@ -83,6 +129,7 @@ fun OpencodeTheme(
 ) {
     MaterialTheme(
         colorScheme = OpencodeColors,
+        typography = OpencodeTypography,
         content = content,
     )
 }
@@ -105,7 +152,7 @@ private fun DrawScope.drawGlowCircle(color: Color, radiusPx: Float) {
 @Stable
 fun Modifier.glow(
     color: Color = Accent,
-    radius: Dp = 12.dp,
+    radius: androidx.compose.ui.unit.Dp = 12.dp,
 ): Modifier = this.drawBehind {
     val radiusPx = radius.toPx()
     drawGlowCircle(color, radiusPx)
@@ -114,7 +161,7 @@ fun Modifier.glow(
 @Composable
 fun Modifier.pulsingGlow(
     color: Color = Accent,
-    radius: Dp = 16.dp,
+    radius: androidx.compose.ui.unit.Dp = 16.dp,
 ): Modifier {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val alpha by infiniteTransition.animateFloat(
@@ -127,28 +174,4 @@ fun Modifier.pulsingGlow(
         label = "pulseAlpha",
     )
     return this.glow(color.copy(alpha = alpha), radius)
-}
-
-@Stable
-fun Modifier.accentGlowLine(
-    color: Color = Accent,
-    height: Dp = 2.dp,
-    radius: Dp = 6.dp,
-): Modifier = this.drawBehind {
-    val hPx = height.toPx()
-    val rPx = radius.toPx()
-    drawLine(
-        color = color,
-        start = Offset(0f, size.height / 2f),
-        end = Offset(size.width, size.height / 2f),
-        strokeWidth = hPx,
-        blendMode = BlendMode.Screen,
-    )
-    drawLine(
-        color = color.copy(alpha = 0.5f),
-        start = Offset(0f, size.height / 2f),
-        end = Offset(size.width, size.height / 2f),
-        strokeWidth = hPx * 3f,
-        blendMode = BlendMode.Screen,
-    )
 }
