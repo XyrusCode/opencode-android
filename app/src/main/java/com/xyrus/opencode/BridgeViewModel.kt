@@ -11,6 +11,9 @@ import com.xyrus.opencode.bridge.Provider
 import com.xyrus.opencode.bridge.QuestionPrompt
 import com.xyrus.opencode.bridge.Session
 import com.xyrus.opencode.bridge.SessionMessage
+import com.xyrus.opencode.opencode.FrameSource
+import com.xyrus.opencode.opencode.ServerConfig
+import com.xyrus.opencode.opencode.V2Client
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -78,7 +81,7 @@ data class ModelChoice(
 data class UiState(
     val host: String = "",
     val port: Int = DEFAULT_PORT,
-    val connection: BridgeClient.State = BridgeClient.State.Disconnected,
+    val connection: FrameSource.State = FrameSource.State.Disconnected,
     val sessions: List<Session> = emptyList(),
     val attachedSession: Session? = null,
     val transcript: List<TranscriptItem> = emptyList(),
@@ -100,28 +103,43 @@ data class UiState(
     // Which composer picker sheet is open.
     val openPicker: PickerTarget? = null,
 ) {
-    val isConnected get() = connection == BridgeClient.State.Ready
+    val isConnected get() = connection == FrameSource.State.Ready
     val canSend get() = isConnected && attachedSession != null && !streaming
 }
 
 /**
- * Holds the bridge connection and everything the UI renders.
+ * Holds the opencode connection and everything the UI renders.
  *
- * BridgeClient calls back on OkHttp's dispatcher thread, so every mutation is
- * funnelled through [viewModelScope] to keep StateFlow writes main-safe.
+ * Two transports implement [FrameSource]: a direct v2 HTTP client and the
+ * original desktop bridge. Callbacks arrive on background threads, so every
+ * mutation is funnelled through [viewModelScope] to keep StateFlow writes
+ * main-safe.
  */
 class BridgeViewModel : ViewModel() {
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
-    private var client: BridgeClient? = null
+    private var client: FrameSource? = null
 
     fun setHost(host: String) = _state.update { it.copy(host = host.trim()) }
 
     fun setPort(port: Int) = _state.update { it.copy(port = port) }
 
-    fun connect() {
+    /** Connect straight to an opencode v2 server with a paired token or password. */
+    fun connectDirect(server: ServerConfig) {
+        disconnect()
+        val direct = V2Client(
+            server = server,
+            onMessage = { frame -> viewModelScope.launch { handle(frame) } },
+            onStateChange = { state -> viewModelScope.launch { onConnectionChange(state) } },
+        )
+        client = direct
+        direct.connect()
+    }
+
+    /** Fallback transport: the desktop bridge WebSocket. */
+    fun connectBridge() {
         val current = _state.value
         if (current.host.isBlank()) {
             _state.update { it.copy(error = "Enter the desktop IP address") }
@@ -143,7 +161,7 @@ class BridgeViewModel : ViewModel() {
         client = null
         _state.update {
             it.copy(
-                connection = BridgeClient.State.Disconnected,
+                connection = FrameSource.State.Disconnected,
                 attachedSession = null,
                 streaming = false,
                 pendingPermission = null,
@@ -269,7 +287,7 @@ class BridgeViewModel : ViewModel() {
                 streaming = true,
             )
         }
-        client?.prompt(session.id, trimmed)
+        client?.send(session.id, trimmed)
     }
 
     fun abort() {
@@ -283,22 +301,22 @@ class BridgeViewModel : ViewModel() {
 
     // --- Frame handling ------------------------------------------------------
 
-    private fun onConnectionChange(state: BridgeClient.State) {
+    private fun onConnectionChange(state: FrameSource.State) {
         _state.update { it.copy(connection = state) }
-        if (state == BridgeClient.State.Ready) loadSessions()
+        if (state == FrameSource.State.Ready) loadSessions()
     }
 
     private fun handle(frame: SessionMessage) {
         when (frame.type) {
             "welcome" -> _state.update {
-                it.copy(connection = BridgeClient.State.Ready, error = null)
+                it.copy(connection = FrameSource.State.Ready, error = null)
             }
 
             "error" -> {
                 _state.update { it.copy(error = frame.message ?: "Unknown bridge error") }
                 client?.shutdown()
                 client = null
-                _state.update { it.copy(connection = BridgeClient.State.Failed) }
+                _state.update { it.copy(connection = FrameSource.State.Failed) }
             }
 
             "sessions" -> if (frame.kind == "list") {

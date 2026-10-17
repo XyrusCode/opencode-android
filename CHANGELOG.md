@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-17
+
+### Fixed
+- Sessions started in the opencode desktop app now appear on the phone. The two
+  versions keep separate session tables in the same database, and the app was
+  connected to the older server, which only ever saw the older table. It now
+  talks to opencode's current API directly, so every session is visible.
+- Live streaming works against the current API, including tool calls and
+  permission prompts.
+
+### Added
+- Connect straight to opencode with either a pairing code (`opencode pair`,
+  including `--remote`) or a host and password. Servers are saved so you only
+  pair once, and the connect screen shows how long a pairing stays valid.
+- The desktop bridge is still available as a fallback from the connect screen,
+  so existing setups keep working.
+
 ## [0.4.3] - 2026-10-17
 
 ### Added

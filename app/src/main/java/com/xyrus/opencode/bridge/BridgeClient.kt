@@ -1,6 +1,7 @@
 package com.xyrus.opencode.bridge
 
 import android.util.Log
+import com.xyrus.opencode.opencode.FrameSource
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -13,6 +14,10 @@ import java.util.concurrent.TimeUnit
 /**
  * WebSocket client for the desktop bridge.
  *
+ * Kept as a fallback transport for setups where talking to opencode directly is
+ * not wanted. It emits the same frames as the direct v2 client, so nothing
+ * above it needs to know which one is in use.
+ *
  * Owns exactly one socket and one OkHttpClient. Callbacks arrive on OkHttp's
  * dispatcher thread, so consumers are expected to hop to their own scope before
  * touching state.
@@ -20,9 +25,11 @@ import java.util.concurrent.TimeUnit
 class BridgeClient(
     private val token: String,
     private val onMessage: (SessionMessage) -> Unit,
-    private val onStateChange: (State) -> Unit,
-) {
-    enum class State { Disconnected, Connecting, Authenticating, Ready, Failed }
+    private val onStateChange: (FrameSource.State) -> Unit,
+) : FrameSource {
+
+    private var host: String = ""
+    private var port: Int = 9876
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -32,10 +39,16 @@ class BridgeClient(
 
     private var socket: WebSocket? = null
 
-    /** Open the socket and authenticate. Safe to call when already open. */
+    /** Point the client at a bridge and connect. */
     fun connect(host: String, port: Int) {
-        if (socket != null) return
-        onStateChange(State.Connecting)
+        this.host = host
+        this.port = port
+        connect()
+    }
+
+    override fun connect() {
+        if (socket != null || host.isEmpty()) return
+        onStateChange(FrameSource.State.Connecting)
 
         val request = Request.Builder()
             .url("ws://$host:$port")
@@ -43,7 +56,7 @@ class BridgeClient(
 
         socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                onStateChange(State.Authenticating)
+                onStateChange(FrameSource.State.Authenticating)
                 val auth = JSONObject().put("type", "auth").put("token", token)
                 webSocket.send(auth.toString())
             }
@@ -64,12 +77,12 @@ class BridgeClient(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "socket failed", t)
                 socket = null
-                onStateChange(State.Failed)
+                onStateChange(FrameSource.State.Failed)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 socket = null
-                onStateChange(State.Disconnected)
+                onStateChange(FrameSource.State.Disconnected)
             }
         })
     }
@@ -79,15 +92,15 @@ class BridgeClient(
         return current.send(frame.toString())
     }
 
-    fun listSessions() = send(JSONObject().put("type", "list_sessions"))
+    override fun listSessions() = send(JSONObject().put("type", "list_sessions"))
 
-    fun createSession(title: String = "") =
+    override fun createSession(title: String) =
         send(JSONObject().put("type", "create_session").put("title", title))
 
-    fun attach(sessionId: String) =
+    override fun attach(sessionId: String) =
         send(JSONObject().put("type", "attach").put("sessionID", sessionId))
 
-    fun prompt(sessionId: String, text: String) =
+    override fun send(sessionId: String, text: String) =
         send(
             JSONObject()
                 .put("type", "prompt")
@@ -100,7 +113,7 @@ class BridgeClient(
     // (per-message override is the only setter opencode supports), so the
     // ViewModel re-sends the active selection before every message.
 
-    fun selectModel(sessionId: String?, modelID: String, providerID: String) =
+    override fun selectModel(sessionId: String?, modelID: String, providerID: String) =
         send(
             JSONObject().put("type", "select_model").apply {
                 if (sessionId != null) put("sessionID", sessionId)
@@ -109,17 +122,17 @@ class BridgeClient(
             },
         )
 
-    fun selectAgent(agent: String) =
+    override fun selectAgent(agent: String) =
         send(JSONObject().put("type", "select_agent").put("agent", agent))
 
     /** Remembered until the next create_session, which is where it applies. */
-    fun pickProject(worktree: String) =
-        send(JSONObject().put("type", "pick_project").put("worktree", worktree))
+    override fun pickProject(directory: String) =
+        send(JSONObject().put("type", "pick_project").put("worktree", directory))
 
     // --- Interactive prompt replies ----------------------------------------
 
     /** reply is one of "once", "always", "reject". */
-    fun replyPermission(requestID: String, reply: String, message: String? = null) =
+    override fun replyPermission(requestID: String, reply: String, message: String?): Boolean =
         send(
             JSONObject().put("type", "reply_permission").apply {
                 put("requestID", requestID)
@@ -129,20 +142,20 @@ class BridgeClient(
         )
 
     /** answers is one list of selected labels per question, in order. */
-    fun replyQuestion(requestID: String, answers: List<List<String>>) {
+    override fun replyQuestion(requestID: String, answers: List<List<String>>): Boolean {
         val array = JSONArray()
         answers.forEach { selected -> array.put(JSONArray(selected)) }
-        send(
+        return send(
             JSONObject().put("type", "reply_question")
                 .put("requestID", requestID)
                 .put("answers", array),
         )
     }
 
-    fun abort(sessionId: String) =
+    override fun abort(sessionId: String) =
         send(JSONObject().put("type", "abort").put("sessionID", sessionId))
 
-    fun renameSession(sessionId: String, title: String) =
+    override fun renameSession(sessionId: String, title: String) =
         send(
             JSONObject().put("type", "rename_session")
                 .put("sessionID", sessionId)
@@ -150,17 +163,17 @@ class BridgeClient(
         )
 
     /** Permanent: opencode drops the session and its messages. */
-    fun deleteSession(sessionId: String) =
+    override fun deleteSession(sessionId: String) =
         send(JSONObject().put("type", "delete_session").put("sessionID", sessionId))
 
-    fun disconnect() {
+    override fun disconnect() {
         socket?.close(1000, "client disconnect")
         socket = null
-        onStateChange(State.Disconnected)
+        onStateChange(FrameSource.State.Disconnected)
     }
 
     /** Releases the connection pool. Call when the client is no longer needed. */
-    fun shutdown() {
+    override fun shutdown() {
         disconnect()
         http.dispatcher.executorService.shutdown()
         http.connectionPool.evictAll()

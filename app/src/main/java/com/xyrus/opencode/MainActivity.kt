@@ -19,8 +19,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xyrus.opencode.data.UpdateChecker
+import com.xyrus.opencode.ui.ConnectScreen
 import com.xyrus.opencode.ui.ConversationsDrawer
-import com.xyrus.opencode.ui.PairingScreen
 import com.xyrus.opencode.ui.SessionScreen
 import com.xyrus.opencode.ui.UpdatesScreen
 import com.xyrus.opencode.ui.theme.OpencodeTheme
@@ -70,9 +70,10 @@ class MainActivity : ComponentActivity() {
                                 onOpenDrawer = { scope.launch { drawerState.open() } },
                             )
 
-                            else -> PairingScreen(
+                            else -> ConnectScreen(
                                 viewModel = viewModel,
                                 onOpenUpdates = { showUpdates = true },
+                                onOpenDrawer = { scope.launch { drawerState.open() } },
                             )
                         }
                     }
