@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-10-17
+
+### Fixed
+- Sending a message to an older session could wedge it in a permanent "working"
+  state. Sessions carry the model and agent they were last driven with, and those
+  are now restored when you open one, so a prompt is never sent without a model.
+  As a backstop the bridge fills in the session's own model and agent if the
+  phone has none selected.
+- One wedged session no longer blocks every other session. Switching sessions now
+  clears the stuck working state instead of leaving the composer disabled
+  app-wide.
+- The drawer's "Settings" label was not tappable; only the gear icon was. The
+  whole row is now one tap target.
+
+### Changed
+- All projects now appear in the drawer. The bridge previously capped the session
+  list at the 50 newest overall, so one busy project crowded others out of the
+  list entirely; it now returns everything opencode holds (327 sessions across 29
+  project folders here) in a single request.
+- Each project previews its 5 most recent sessions. Searching narrows to matching
+  sessions before the cap, so a session older than the preview is still findable.
+
 ## [0.4.1] - 2026-10-17
 
 ### Fixed

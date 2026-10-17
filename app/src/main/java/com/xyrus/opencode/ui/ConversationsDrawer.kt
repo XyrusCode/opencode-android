@@ -22,7 +22,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Text
@@ -66,6 +66,46 @@ private fun relativeAge(updated: Long?): String {
     }
 }
 
+/** How many recent sessions a project shows before the list gets unwieldy. */
+private const val PROJECT_SESSION_PREVIEW = 5
+
+/**
+ * Group sessions into real projects for the drawer, newest session first, capped
+ * to [preview] sessions each.
+ *
+ * Scratch sessions under a Temp directory are dropped so navigation stays real.
+ * Searching narrows to matching sessions (or the whole project when the project
+ * name matches) *before* the cap, so a hit older than the preview still shows.
+ */
+fun groupSessionsByProject(
+    sessions: List<Session>,
+    search: String = "",
+    preview: Int = PROJECT_SESSION_PREVIEW,
+): List<Pair<RealProject, List<Session>>> =
+    sessions
+        .filter { s ->
+            val d = s.directory
+            d != null && !d.contains("\\Temp\\", ignoreCase = true) && !d.contains("/Temp/", ignoreCase = true)
+        }
+        .groupBy { it.directory!! }
+        .map { (dir, inDir) ->
+            val name = dir.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
+            val project = RealProject(name, dir)
+            // Newest first. While searching, narrow to sessions whose title
+            // matches so the preview cap surfaces the hit instead of the five
+            // newest; a project-name match shows that whole project.
+            val ordered = inDir.sortedByDescending { it.updated ?: 0L }
+            val visible = when {
+                search.isBlank() -> ordered
+                project.name.contains(search, true) -> ordered
+                else -> ordered.filter { it.title.contains(search, true) }
+            }
+            project to visible
+        }
+        .filter { (_, visible) -> visible.isNotEmpty() }
+        .map { (project, visible) -> project to visible.take(preview) }
+        .sortedBy { it.first.name.lowercase() }
+
 /**
  * Navigation drawer, Antigravity-style: New Conversation, search, then real
  * projects (grouped from session directories) that expand to reveal their
@@ -82,21 +122,7 @@ fun ConversationsDrawer(
     val expanded = remember { mutableStateListOf<String>() }
 
     val groups: List<Pair<RealProject, List<Session>>> = remember(state.sessions, search) {
-        state.sessions
-            .filter { s ->
-                val d = s.directory
-                d != null && !d.contains("\\Temp\\", true) && !d.contains("/Temp/", true)
-            }
-            .groupBy { it.directory!! }
-            .map { (dir, sessions) ->
-                val name = dir.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
-                RealProject(name, dir) to sessions.sortedByDescending { it.updated ?: 0L }
-            }
-            .filter { (proj, sessions) ->
-                search.isBlank() || proj.name.contains(search, true) ||
-                    sessions.any { it.title.contains(search, true) }
-            }
-            .sortedBy { it.first.name.lowercase() }
+        groupSessionsByProject(state.sessions, search)
     }
 
     ModalDrawerSheet(drawerContainerColor = Bg) {
@@ -231,10 +257,18 @@ fun ConversationsDrawer(
                 Modifier.fillMaxWidth().padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onOpenUpdates) {
+                // Gear and label are one tap target; the label alone used to be dead.
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onOpenUpdates() }
+                        .padding(horizontal = 10.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Icon(Icons.Default.Settings, contentDescription = "Settings", tint = TextDim)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Settings", style = MaterialTheme.typography.labelLarge, color = TextDim)
                 }
-                Text("Settings", style = MaterialTheme.typography.labelLarge, color = TextDim)
                 Spacer(Modifier.weight(1f))
                 Text(
                     "Disconnect",

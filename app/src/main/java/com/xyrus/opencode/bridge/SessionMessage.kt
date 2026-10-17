@@ -206,6 +206,10 @@ data class Session(
     val title: String,
     val directory: String?,
     val model: String?,
+    /** Provider the session's own model belongs to, so attaching can pre-select it. */
+    val provider: String? = null,
+    /** The agent this session was last driven with. */
+    val agent: String? = null,
     /** Epoch millis of the last update, used to group Today vs Older. */
     val updated: Long? = null,
 ) {
@@ -221,6 +225,8 @@ data class Session(
             title = json.optString("title"),
             directory = json.optStringOrNull("directory"),
             model = json.optStringOrNull("model"),
+            provider = json.optStringOrNull("provider"),
+            agent = json.optStringOrNull("agent"),
             updated = json.optLong("updated", 0L).takeIf { it > 0L },
         )
     }

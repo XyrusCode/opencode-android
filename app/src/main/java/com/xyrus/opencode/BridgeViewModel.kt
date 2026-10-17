@@ -155,13 +155,21 @@ class BridgeViewModel : ViewModel() {
     fun loadSessions() = client?.listSessions()
 
     fun attach(session: Session) {
+        // Carry the session's own model/agent over: send() re-pushes the
+        // selection before every prompt, so a prompt never goes out model-less
+        // (which wedges opencode into a permanent "busy"). Clearing streaming
+        // stops a previously wedged session from blocking this one.
+        val carried = session.model?.let { ModelChoice(it, session.provider.orEmpty(), it) }
         _state.update {
             it.copy(
                 attachedSession = session,
                 transcript = emptyList(),
                 error = null,
+                streaming = false,
                 pendingPermission = null,
                 pendingQuestion = null,
+                selectedModel = carried ?: it.selectedModel,
+                selectedAgent = session.agent ?: it.selectedAgent,
             )
         }
         client?.attach(session.id)

@@ -52,6 +52,38 @@ class SessionMessageTest {
     }
 
     @Test
+    fun `session carries the model provider and agent it was last driven with`() {
+        // Attaching to an existing session has to restore its own model+agent, or
+        // the next prompt goes out with no model and opencode wedges the session
+        // into a permanent busy state. This is the data that carry-over needs.
+        val raw = """
+            {"type":"sessions","kind":"list","sessions":[
+              {"id":"ses_1","title":"Fix CI","directory":"C:\\work\\repo",
+               "model":"mimo-v2.5-free","provider":"opencode","agent":"general"}
+            ]}
+        """.trimIndent()
+
+        val session = SessionMessage.parse(raw).sessions.single()
+        assertEquals("mimo-v2.5-free", session.model)
+        assertEquals("opencode", session.provider)
+        assertEquals("general", session.agent)
+    }
+
+    @Test
+    fun `session without a preset model leaves provider and agent null`() {
+        val raw = """
+            {"type":"sessions","kind":"list","sessions":[
+              {"id":"ses_2","title":"Docs","directory":"C:\\work"}
+            ]}
+        """.trimIndent()
+
+        val session = SessionMessage.parse(raw).sessions.single()
+        assertNull(session.model)
+        assertNull(session.provider)
+        assertNull(session.agent)
+    }
+
+    @Test
     fun `parses structured history messages with parts`() {
         val raw = """
             {"type":"history","sessionID":"ses_1",
