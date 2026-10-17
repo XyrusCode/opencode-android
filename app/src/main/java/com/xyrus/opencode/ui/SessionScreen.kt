@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -33,6 +32,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Difference
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
@@ -102,7 +102,11 @@ private fun Wordmark(size: Int = 34) {
 /** Attached-session chat surface: transcript plus a pinned composer. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionScreen(viewModel: BridgeViewModel, modifier: Modifier = Modifier) {
+fun SessionScreen(
+    viewModel: BridgeViewModel,
+    onOpenDrawer: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var draft by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -119,8 +123,8 @@ fun SessionScreen(viewModel: BridgeViewModel, modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp, start = 4.dp, end = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = viewModel::disconnect) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextDim)
+                IconButton(onClick = onOpenDrawer) {
+                    Icon(Icons.Default.Menu, contentDescription = "Conversations", tint = TextDim)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -356,7 +360,7 @@ private fun ComposerChip(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun transparentFieldColors() = TextFieldDefaults.colors(
+internal fun transparentFieldColors() = TextFieldDefaults.colors(
     focusedContainerColor = Color.Transparent,
     unfocusedContainerColor = Color.Transparent,
     focusedIndicatorColor = Color.Transparent,
