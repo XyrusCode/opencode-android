@@ -203,21 +203,27 @@ class UpdateChecker(private val context: Context) {
         null
     }
 
-    /** Install [file] via a FileProvider URI — no external-storage permission. */
+    /**
+     * Install [file] via a FileProvider URI — no external-storage permission.
+     * On Android 11+ package visibility makes resolveActivity() return null for the
+     * installer, so we launch directly and treat only a real launch failure as an
+     * error (surfaced to the caller).
+     */
     fun installApk(file: File): Boolean {
-        val uri = FileProvider.getUriForFile(
-            context,
-            context.packageName + ".fileprovider",
-            file,
-        )
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
-        }
-        return if (context.packageManager.resolveActivity(intent, 0) != null) {
+        return try {
+            val uri = FileProvider.getUriForFile(
+                context,
+                context.packageName + ".fileprovider",
+                file,
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+            }
             context.startActivity(intent)
             true
-        } else {
+        } catch (e: Exception) {
+            android.util.Log.w("UpdateChecker", "could not launch the package installer", e)
             false
         }
     }

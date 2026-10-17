@@ -83,7 +83,10 @@ fun ConversationsDrawer(
 
     val groups: List<Pair<RealProject, List<Session>>> = remember(state.sessions, search) {
         state.sessions
-            .filter { it.directory != null }
+            .filter { s ->
+                val d = s.directory
+                d != null && !d.contains("\\Temp\\", true) && !d.contains("/Temp/", true)
+            }
             .groupBy { it.directory!! }
             .map { (dir, sessions) ->
                 val name = dir.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
