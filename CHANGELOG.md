@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-17
+
+### Changed
+- Full UI overhaul to feel like a real AI harness (ChatGPT / Claude pattern)
+  with opencode branding throughout.
+- New theme: opencode's real palette (warm near-black, cream ink, peach primary,
+  purple secondary) and bundled IBM Plex Mono for a monospace-first look,
+  replacing the previous Video-Plucker glass styling.
+- Chat transcript: user messages are right-aligned bubbles, assistant messages
+  are full-width, and tool/file/diff parts are stacked cards with type icons.
+- New pinned composer with opencode's placeholder, a circular send that becomes
+  Stop while streaming, and model/agent/project chips attached beneath it.
+- Conversation drawer for navigating chats (projects, search, Today/Older).
+
+### Added
+- Official opencode wordmark as the adaptive launcher icon.
+- Markdown rendering for assistant text: fenced code blocks, bold, inline code
+  and bullets, via a small hand-rolled renderer.
+
 ## [0.2.4] - 2026-10-16
 
 ### Fixed
