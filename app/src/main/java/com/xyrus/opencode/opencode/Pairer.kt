@@ -4,6 +4,9 @@ import android.util.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,34 +32,51 @@ object Pairer {
         data class Unreachable(val tried: List<String>) : Outcome
     }
 
-    fun pair(code: String, bases: List<String>, timeoutSeconds: Long = 10): Outcome {
+    fun pair(code: String, bases: List<String>, timeoutSeconds: Long = 4): Outcome {
         if (bases.isEmpty()) return Outcome.Unreachable(emptyList())
 
         val client = OkHttpClient.Builder()
             .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
-            .readTimeout(timeoutSeconds * 2, TimeUnit.SECONDS)
+            .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .build()
 
-        var answered = 0
-        var lastError: String? = null
-
-        for (base in bases) {
-            val attempt = exchange(client, base, code)
-            when (attempt) {
-                is Exchange.Token -> return Outcome.Paired(base, attempt.token)
-                is Exchange.Refused -> {
-                    // The server is there but said no: the code is stale, used,
-                    // or belongs to a different machine. No other address will
-                    // do better, so stop rather than hammering the rest.
-                    return Outcome.Rejected(attempt.detail)
+        // Probe every candidate at once. Trying them in order cost a full
+        // timeout per unreachable address, so a phone that could only reach the
+        // tunnel sat through four dead LAN attempts before connecting. In
+        // parallel the whole set costs one timeout.
+        val pool = Executors.newFixedThreadPool(minOf(bases.size, 8))
+        val results = ConcurrentHashMap<Int, Exchange>()
+        val latch = CountDownLatch(bases.size)
+        try {
+            bases.forEachIndexed { index, base ->
+                pool.execute {
+                    results[index] = exchange(client, base, code)
+                    latch.countDown()
                 }
-                is Exchange.Unreachable -> lastError = attempt.detail
             }
-            answered++
+            // Give the slowest candidate one window, then decide on what we have.
+            latch.await(timeoutSeconds, TimeUnit.SECONDS)
+        } finally {
+            pool.shutdownNow()
+            client.dispatcher.executorService.shutdown()
         }
 
-        return Outcome.Unreachable(bases)
-            .let { if (lastError != null) Outcome.Unreachable(bases) else it }
+        // bases is already in preference order, so the earliest success wins:
+        // Tailscale if it answered, otherwise the LAN, otherwise the tunnel.
+        var refused: String? = null
+        for (index in bases.indices) {
+            when (val outcome = results[index]) {
+                is Exchange.Token -> return Outcome.Paired(bases[index], outcome.token)
+                // Remembered rather than returned: a stale server on one address
+                // can refuse a code the live one accepts.
+                is Exchange.Refused -> if (refused == null) refused = outcome.detail
+                is Exchange.Unreachable -> Unit
+                null -> Unit
+            }
+        }
+        // Only a refusal is a real diagnosis. Anything else means we simply never
+        // got a route to the machine.
+        return if (refused != null) Outcome.Rejected(refused) else Outcome.Unreachable(bases)
     }
 
     private sealed interface Exchange {

@@ -51,9 +51,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.xyrus.opencode.BridgeViewModel
 import com.xyrus.opencode.opencode.AuthKind
+import com.xyrus.opencode.opencode.FrameSource
 import com.xyrus.opencode.opencode.PairLink
 import com.xyrus.opencode.opencode.ServerConfig
 import com.xyrus.opencode.opencode.ServerStore
+import com.xyrus.opencode.opencode.catalogCacheFile
 import com.xyrus.opencode.ui.theme.Accent
 import com.xyrus.opencode.ui.theme.Bg
 import com.xyrus.opencode.ui.theme.BorderCol
@@ -84,6 +86,13 @@ fun ConnectScreen(
     viewModel: BridgeViewModel,
     onOpenUpdates: () -> Unit,
     onOpenDrawer: () -> Unit = {},
+    /**
+     * Add-server is a full screen with its own scroller, so it cannot be
+     * composed inside this one: nesting a verticalScroll inside another gives
+     * the inner one infinite height and Compose throws. Navigation happens at
+     * the Activity level instead.
+     */
+    onAddServer: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -91,7 +100,6 @@ fun ConnectScreen(
 
     var servers by remember { mutableStateOf(store.servers()) }
     var selected by remember { mutableStateOf(store.selectedId) }
-    var adding by remember { mutableStateOf(false) }
     var showBridge by remember { mutableStateOf(false) }
 
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -132,10 +140,28 @@ fun ConnectScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Bg),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Browse sessions") }
-            state.error?.let {
-                Spacer(Modifier.height(8.dp))
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(20.dp))
+        } else if (state.connection == FrameSource.State.Failed) {
+            // A failed connection has to say so. Showing this only when
+            // connected meant a connection that never came up looked identical
+            // to an idle screen.
+            Text(
+                state.error ?: "Could not reach that server.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(10.dp))
+            servers.firstOrNull { it.id == selected }?.let { server ->
+                OutlinedButton(
+                    onClick = { viewModel.connectDirect(server) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Try again") }
+                Spacer(Modifier.height(20.dp))
             }
+        }
+
+        state.error?.takeIf { state.isConnected }?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(20.dp))
         }
 
@@ -143,7 +169,7 @@ fun ConnectScreen(
             Text("No servers saved", style = MaterialTheme.typography.labelMedium, color = TextDim)
             Spacer(Modifier.height(10.dp))
             Button(
-                onClick = { adding = true },
+                onClick = onAddServer,
                 colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Bg),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Add a server") }
@@ -155,7 +181,7 @@ fun ConnectScreen(
                     onClick = {
                         selected = server.id
                         store.selectedId = server.id
-                        viewModel.connectDirect(server)
+                        viewModel.connectDirect(server, catalogCacheFile(context, server.id))
                     },
                     onRemove = {
                         store.delete(server.id)
@@ -167,7 +193,7 @@ fun ConnectScreen(
             }
             Spacer(Modifier.height(6.dp))
             OutlinedButton(
-                onClick = { adding = true },
+                onClick = onAddServer,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -190,19 +216,6 @@ fun ConnectScreen(
             BridgeFallback(viewModel, store)
         }
 
-        if (adding) {
-            AddServerScreen(
-                onBack = { adding = false },
-                onSaved = { server ->
-                    store.save(server)
-                    store.selectedId = server.id
-                    selected = server.id
-                    servers = store.servers()
-                    adding = false
-                    viewModel.connectDirect(server)
-                },
-            )
-        }
     }
 }
 

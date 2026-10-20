@@ -1,5 +1,6 @@
 package com.xyrus.opencode
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -19,6 +20,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xyrus.opencode.data.UpdateChecker
+import com.xyrus.opencode.opencode.ServerStore
+import com.xyrus.opencode.opencode.catalogCacheFile
+import com.xyrus.opencode.ui.AddServerScreen
 import com.xyrus.opencode.ui.ConnectScreen
 import com.xyrus.opencode.ui.ConversationsDrawer
 import com.xyrus.opencode.ui.SessionScreen
@@ -26,6 +30,7 @@ import com.xyrus.opencode.ui.SettingsScreen
 import com.xyrus.opencode.ui.UpdatesScreen
 import com.xyrus.opencode.ui.theme.OpencodeTheme
 import kotlinx.coroutines.launch
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,6 +45,7 @@ class MainActivity : ComponentActivity() {
                 val checker = remember { UpdateChecker(context) }
                 var showUpdates by rememberSaveable { mutableStateOf(false) }
                 var showSettings by rememberSaveable { mutableStateOf(false) }
+                var addingServer by rememberSaveable { mutableStateOf(false) }
 
                 val drawerState = rememberDrawerState(DrawerValue.Closed)
                 val scope = rememberCoroutineScope()
@@ -62,6 +68,21 @@ class MainActivity : ComponentActivity() {
                         },
                     ) {
                         when {
+                            // Add-server scrolls on its own, so it replaces the
+                            // whole screen rather than sitting inside the
+                            // connect screen's scroll container.
+                            addingServer -> AddServerScreen(
+                                onBack = { addingServer = false },
+                                onSaved = { server ->
+                                    ServerStore(context).run {
+                                        save(server)
+                                        selectedId = server.id
+                                    }
+                                    addingServer = false
+                                    viewModel.connectDirect(server, catalogCacheFile(context, server.id))
+                                },
+                            )
+
                             showSettings -> SettingsScreen(
                                 onBack = { showSettings = false },
                                 onOpenUpdates = {
@@ -83,6 +104,7 @@ class MainActivity : ComponentActivity() {
                             else -> ConnectScreen(
                                 viewModel = viewModel,
                                 onOpenUpdates = { showSettings = true },
+                                onAddServer = { addingServer = true },
                                 onOpenDrawer = { scope.launch { drawerState.open() } },
                             )
                         }

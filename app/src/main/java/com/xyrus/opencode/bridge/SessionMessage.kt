@@ -161,6 +161,7 @@ data class SessionMessage(
                     patterns = json.optStringArray("patterns"),
                     toolCallID = tool?.optStringOrNull("callID"),
                     toolMessageID = tool?.optStringOrNull("messageID"),
+                    message = json.optStringOrNull("message"),
                 )
             } else {
                 null
@@ -278,6 +279,12 @@ data class PermissionPrompt(
     val patterns: List<String>,
     val toolCallID: String?,
     val toolMessageID: String?,
+    /**
+     * v2's own words for what it wants to do. Without this the dialog could only
+     * say "opencode wants to run a tool", which is not enough to approve or
+     * refuse on a phone.
+     */
+    val message: String? = null,
 )
 
 data class QuestionPrompt(

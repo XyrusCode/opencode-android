@@ -10,6 +10,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
@@ -28,6 +29,7 @@ class V2Client(
     private val server: ServerConfig,
     private val onMessage: (SessionMessage) -> Unit,
     private val onStateChange: (FrameSource.State) -> Unit,
+    private val catalogCache: File? = null,
 ) : FrameSource {
 
     override fun connect() {
@@ -39,9 +41,19 @@ class V2Client(
                 get("/api/session?limit=1")
                 onStateChange(FrameSource.State.Ready)
                 listSessions()
+                // Warm the pickers now so opening a session does not wait on them.
+                pushCatalogs()
                 startEventStream()
                 startPromptPolling()
             } catch (e: Exception) {
+                // A client that was deliberately torn down mid-connect is not a
+                // failure worth showing: switching servers interrupts the old
+                // one's in-flight request, and that is not an error the user
+                // did anything about.
+                if (state == FrameSource.State.Disconnected) {
+                    Log.d(TAG, "connect abandoned (client closed)")
+                    return@execute
+                }
                 Log.w(TAG, "connect failed", e)
                 onStateChange(FrameSource.State.Failed)
             }
@@ -67,6 +79,17 @@ class V2Client(
         Thread(r, "v2-source").apply { isDaemon = true }
     }
 
+    /**
+     * Catalogs are large and slow to fetch (1105 models, 108 projects) so they
+     * get their own thread. Sharing the worker meant opening a session waited
+     * behind them, and refetching on every attach made it worse.
+     */
+    private val catalogWorker = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "v2-catalogs").apply { isDaemon = true }
+    }
+
+    private val catalogsPushed = java.util.concurrent.atomic.AtomicBoolean(false)
+
     @Volatile
     private var state: FrameSource.State = FrameSource.State.Disconnected
 
@@ -91,22 +114,37 @@ class V2Client(
             .url(server.baseUrl.trimEnd('/') + path)
             .header("Authorization", authHeader())
 
-    private fun get(path: String): JSONObject? {
-        http.newCall(request(path).get().build()).execute().use { resp ->
-            val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw OpencodeHttpException(resp.code, body.take(200))
-            return if (body.isBlank()) null else unwrap(JSONObject(body))
-        }
+    /**
+ * Not every v2 endpoint answers with the same envelope. Most wrap their
+ * payload as {"data": ...}, but /api/project answers with a bare array, which
+ * JSONObject() refuses to parse. Normalising an array into {"data": [...]}
+ * means callers can always read optJSONArray("data").
+ */
+private fun parseBody(body: String): JSONObject {
+    val trimmed = body.trim()
+    return if (trimmed.startsWith("[")) {
+        JSONObject().put("data", JSONArray(trimmed))
+    } else {
+        JSONObject(trimmed)
     }
+}
 
-    private fun post(path: String, body: JSONObject? = null): JSONObject? {
-        val payload = (body ?: JSONObject()).toString().toRequestBody(JSON)
-        http.newCall(request(path).post(payload).build()).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw OpencodeHttpException(resp.code, text.take(200))
-            return if (text.isBlank()) null else unwrap(JSONObject(text))
-        }
+private fun get(path: String): JSONObject? {
+    http.newCall(request(path).get().build()).execute().use { resp ->
+        val body = resp.body?.string().orEmpty()
+        if (!resp.isSuccessful) throw OpencodeHttpException(resp.code, body.take(200))
+        return if (body.isBlank()) null else unwrap(parseBody(body))
     }
+}
+
+private fun post(path: String, body: JSONObject? = null): JSONObject? {
+    val payload = (body ?: JSONObject()).toString().toRequestBody(JSON)
+    http.newCall(request(path).post(payload).build()).execute().use { resp ->
+        val text = resp.body?.string().orEmpty()
+        if (!resp.isSuccessful) throw OpencodeHttpException(resp.code, text.take(200))
+        return if (text.isBlank()) null else unwrap(parseBody(text))
+    }
+}
 
     private fun patch(path: String, body: JSONObject): JSONObject? =
         http.newCall(request(path).patch(body.toString().toRequestBody(JSON)).build())
@@ -129,28 +167,62 @@ class V2Client(
         json.optJSONObject("data") ?: json
 
     /** Run a request, turning any failure into an error frame rather than a crash. */
-    private inline fun attempt(body: () -> Unit): Boolean = try {
+private inline fun attempt(body: () -> Unit): Boolean = try {
         body()
         true
     } catch (e: Exception) {
-        Log.w(TAG, "request failed", e)
-        onMessage(
-            SessionMessage(
-                type = "error",
-                message = when {
-                    (e as? OpencodeHttpException)?.code == 401 ->
-                        "That server rejected the credential. Pair again, or check the password."
-                    else -> e.message ?: "opencode request failed"
-                },
-            )
-        )
+        reportFailure(e)
         false
     }
 
-    // --- FrameSource -----------------------------------------------------
+    /**
+ * Hand work to the background thread and return immediately.
+ *
+ * Callers include the main thread: `onConnectionChange` fires `loadSessions`
+ * from the ViewModel scope, and doing the HTTP inline there throws
+ * NetworkOnMainThreadException. Like the bridge client, these are fire-and-
+ * forget; results arrive as frames.
+ */
+private inline fun offThread(crossinline block: () -> Unit): Boolean {
+    val executor = worker
+    return if (executor.isShutdown) {
+        false
+    } else {
+        executor.execute {
+            try {
+                block()
+            } catch (e: Exception) {
+                reportFailure(e)
+            }
+        }
+        true
+    }
+}
 
-    override fun listSessions(): Boolean = attempt {
-        val payload = get("/api/session?limit=500") ?: return@attempt
+private fun reportFailure(e: Exception) {
+        // Same reasoning as connect(): an interrupt means this client was
+        // replaced, not that the server is wrong.
+        if (e is java.io.InterruptedIOException && state == FrameSource.State.Disconnected) {
+            Log.d(TAG, "request abandoned (client closed)")
+            return
+        }
+        Log.w(TAG, "request failed", e)
+    onMessage(
+        SessionMessage(
+            type = "error",
+            message = when {
+                (e as? OpencodeHttpException)?.code == 401 ->
+                    "That server rejected the credential. Pair again, or check the password."
+                else -> e.message ?: "opencode request failed"
+            },
+        )
+    )
+}
+
+// --- FrameSource -----------------------------------------------------
+
+    override fun listSessions(): Boolean = offThread {
+        val payload = get("/api/session?limit=$SESSION_PAGE") ?: return@offThread
         val arr = payload.optJSONArray("data") ?: JSONArray()
         val sessions = (0 until arr.length()).map { parseSession(arr.getJSONObject(it)) }
         onMessage(
@@ -164,10 +236,10 @@ class V2Client(
         )
     }
 
-    override fun createSession(title: String): Boolean = attempt {
+    override fun createSession(title: String): Boolean = offThread {
         val body = JSONObject().put("title", title.ifEmpty { "From phone" })
         pendingDirectory?.let { body.put("location", JSONObject().put("directory", it)) }
-        val payload = post("/api/session", body) ?: return@attempt
+        val payload = post("/api/session", body) ?: return@offThread
         val session = parseSession(payload)
         attachedSession = session.id
         onMessage(
@@ -183,14 +255,24 @@ class V2Client(
         attach(session.id)
     }
 
-    override fun attach(sessionId: String): Boolean = attempt {
+    override fun attach(sessionId: String): Boolean = offThread {
         attachedSession = sessionId
-        val payload = get("/api/session/$sessionId/message?limit=200")
+        // Newest first. This session runs to thousands of messages, so asking for the
+        // first page ascending loads the beginning of the conversation and never
+        // reaches what just happened.
+        val payload = get("/api/session/$sessionId/message?limit=$MESSAGE_PAGE&order=desc")
         val arr = payload?.optJSONArray("data") ?: JSONArray()
         val messages = JSONArray()
-        for (i in 0 until arr.length()) {
-            historyMessage(arr.getJSONObject(i))?.let { messages.put(it) }
+        var skipped = 0
+        // Reverse into chronological order so the transcript reads top to bottom.
+        for (i in arr.length() - 1 downTo 0) {
+            val mapped = historyMessage(arr.getJSONObject(i))
+            if (mapped != null) messages.put(mapped) else skipped++
         }
+        Log.i(
+            TAG,
+            "history for $sessionId: ${arr.length()} returned, ${messages.length()} rendered, $skipped skipped",
+        )
         onMessage(
             SessionMessage.parse(
                 JSONObject()
@@ -212,14 +294,14 @@ class V2Client(
         pushCatalogs()
     }
 
-    override fun send(sessionId: String, text: String): Boolean = attempt {
+    override fun send(sessionId: String, text: String): Boolean = offThread {
         // v2 has no per-message model field, so the session is switched first.
         pendingModel?.let { (modelID, providerID) -> setModelOnServer(sessionId, modelID, providerID) }
         pendingAgent?.let { setAgentOnServer(sessionId, it) }
         post("/api/session/$sessionId/prompt", JSONObject().put("text", text))
     }
 
-    override fun abort(sessionId: String): Boolean = attempt { post("/api/session/$sessionId/interrupt") }
+    override fun abort(sessionId: String): Boolean = offThread { post("/api/session/$sessionId/interrupt") }
 
     override fun selectModel(sessionId: String?, modelID: String, providerID: String): Boolean {
         pendingModel = modelID to providerID
@@ -238,9 +320,9 @@ class V2Client(
         return true
     }
 
-    override fun renameSession(sessionId: String, title: String): Boolean = attempt {
+    override fun renameSession(sessionId: String, title: String): Boolean = offThread {
         val payload = patch("/api/session/$sessionId", JSONObject().put("title", title))
-        val updated = payload?.let { parseSession(it) } ?: return@attempt
+        val updated = payload?.let { parseSession(it) } ?: return@offThread
         onMessage(
             SessionMessage.parse(
                 JSONObject()
@@ -252,7 +334,7 @@ class V2Client(
         )
     }
 
-    override fun deleteSession(sessionId: String): Boolean = attempt {
+    override fun deleteSession(sessionId: String): Boolean = offThread {
         delete("/api/session/$sessionId")
         if (attachedSession == sessionId) attachedSession = null
         onMessage(
@@ -266,15 +348,15 @@ class V2Client(
         )
     }
 
-    override fun replyPermission(requestID: String, reply: String, message: String?): Boolean = attempt {
-        val sessionId = attachedSession ?: return@attempt
+    override fun replyPermission(requestID: String, reply: String, message: String?): Boolean = offThread {
+        val sessionId = attachedSession ?: return@offThread
         val body = JSONObject().put("decision", reply)
         message?.let { body.put("message", it) }
         post("/api/session/$sessionId/permission/$requestID/reply", body)
     }
 
-    override fun replyQuestion(requestID: String, answers: List<List<String>>): Boolean = attempt {
-        val sessionId = attachedSession ?: return@attempt
+    override fun replyQuestion(requestID: String, answers: List<List<String>>): Boolean = offThread {
+        val sessionId = attachedSession ?: return@offThread
         // v2 replaced questions with forms; labels are replied as an answer list.
         val body = JSONObject()
             .put("answers", JSONArray().apply { answers.forEach { put(JSONArray(it)) } })
@@ -290,6 +372,7 @@ class V2Client(
     override fun shutdown() {
         disconnect()
         worker.shutdownNow()
+        catalogWorker.shutdownNow()
     }
 
     // --- streaming -------------------------------------------------------
@@ -355,6 +438,10 @@ class V2Client(
                                             .put("type", "permission_prompt")
                                             .put("requestID", id)
                                             .put("permission", p.optString("action"))
+                                            // v2 explains itself here. Without it the
+                                            // phone can only say "run a tool", which
+                                            // is not something you can judge.
+                                            .put("message", p.optString("message"))
                                             .put(
                                                 "patterns",
                                                 JSONArray().apply {
@@ -423,7 +510,50 @@ class V2Client(
         post("/api/session/$sessionId/agent", JSONObject().put("agent", agent))
     }
 
-    private fun pushCatalogs() = run {
+    /**
+     * Push the model and agent pickers once per connection, off the worker
+     * thread.
+     *
+     * `/api/model` is 892 KB and answers with 1107 models, identically on every
+     * connect. Over a tunnel that is seconds the picker never needed to block on.
+     * So: serve the last good copy from disk immediately, then refresh in the
+     * background. The pickers are usable on the first frame and correct by the
+     * time anyone opens them.
+     */
+    private fun pushCatalogs() {
+        if (!catalogsPushed.compareAndSet(false, true)) return
+        catalogWorker.execute {
+            try {
+                CatalogCache.read(catalogCache)?.let { emitCatalogs(it) }
+                fetchCatalogs()
+            } catch (e: Exception) {
+                // Let a later attempt retry rather than leaving the pickers empty.
+                catalogsPushed.set(false)
+                reportFailure(e)
+            }
+        }
+    }
+
+    private fun emitCatalogs(catalogs: CatalogCache.Catalogs) {
+        onMessage(
+            SessionMessage.parse(
+                JSONObject()
+                    .put("type", "providers")
+                    .put("providers", catalogs.providers)
+                    .toString()
+            )
+        )
+        onMessage(
+            SessionMessage.parse(
+                JSONObject()
+                    .put("type", "agents")
+                    .put("agents", catalogs.agents)
+                    .toString()
+            )
+        )
+    }
+
+    private fun fetchCatalogs() {
         val models = get("/api/model")?.optJSONArray("data") ?: JSONArray()
         val providers = JSONArray()
         val byProvider = linkedMapOf<String, JSONArray>()
@@ -447,53 +577,22 @@ class V2Client(
                     .put("models", modelsForProvider)
             )
         }
-        onMessage(
-            SessionMessage.parse(
-                JSONObject()
-                    .put("type", "providers")
-                    .put("providers", providers)
-                    .toString()
-            )
-        )
 
         val agents = get("/api/agent")?.optJSONArray("data") ?: JSONArray()
-        onMessage(
-            SessionMessage.parse(
-                JSONObject()
-                    .put("type", "agents")
-                    .put("agents", JSONArray().apply {
-                        for (i in 0 until agents.length()) {
-                            val a = agents.getJSONObject(i)
-                            put(
-                                JSONObject()
-                                    .put("name", a.optString("id"))
-                                    .put("description", a.optString("description"))
-                            )
-                        }
-                    })
-                    .toString()
-            )
-        )
+        val agentList = JSONArray().apply {
+            for (i in 0 until agents.length()) {
+                val a = agents.getJSONObject(i)
+                put(
+                    JSONObject()
+                        .put("name", a.optString("id"))
+                        .put("description", a.optString("description"))
+                )
+            }
+        }
 
-        val projects = get("/api/project")?.optJSONArray("data") ?: JSONArray()
-        onMessage(
-            SessionMessage.parse(
-                JSONObject()
-                    .put("type", "projects")
-                    .put("projects", JSONArray().apply {
-                        for (i in 0 until projects.length()) {
-                            val p = projects.getJSONObject(i)
-                            put(
-                                JSONObject()
-                                    .put("id", p.optString("id"))
-                                    .put("name", p.optString("canonical").substringAfterLast('\\').substringAfterLast('/'))
-                                    .put("worktree", p.optString("canonical"))
-                            )
-                        }
-                    })
-                    .toString()
-            )
-        )
+        val catalogs = CatalogCache.Catalogs(providers, agentList)
+        CatalogCache.write(catalogCache, catalogs)
+        emitCatalogs(catalogs)
     }
 
     // --- shape translation ----------------------------------------------
@@ -532,15 +631,29 @@ class V2Client(
                             val c = content.getJSONObject(i)
                             when (c.optString("type")) {
                                 "text" -> put(JSONObject().put("type", "text").put("text", c.optString("text")))
-                                "reasoning" -> put(JSONObject().put("type", "reasoning").put("text", c.optString("text")))
-                                "tool" -> put(
+                                // reasoning/text carry no id of their own. Borrowing the
+                                // message id keeps the card key stable across rebuilds, so
+                                // an expanded card stays expanded.
+                                "reasoning" -> put(
                                     JSONObject()
-                                        .put("type", "tool")
-                                        .put("tool", c.optString("name"))
-                                        .put("callID", c.optString("id"))
-                                        .put("state", c.optJSONObject("state") ?: JSONObject())
+                                        .put("type", "reasoning")
+                                        .put("id", "${message.optString("id")}-r$i")
+                                        .put("text", c.optString("text"))
                                 )
-                                else -> Unit
+                                "tool" -> put(toolPart(c))
+                                // Attachments. v2 models them as Tool.FileContent
+                                // ({type, uri, mime, name}) and the prompt variants
+                                // carry base64 `data`. These used to fall into a
+                                // silent `else -> Unit`, which is why an image sent
+                                // from the desktop simply did not exist on the phone.
+                                "file", "attachment", "image" -> put(filePart(c, message.optString("id"), i))
+                                else -> {
+                                    // Never swallow a type we do not know. A model
+                                    // can add content types ahead of this client,
+                                    // and a blank card is indistinguishable from a
+                                    // bug to whoever is using the phone.
+                                    Log.w(TAG, "unrendered content type '${c.optString("type")}' keys=${c.keys()}")
+                                }
                             }
                         }
                     })
@@ -551,7 +664,56 @@ class V2Client(
         }
     }
 
-    /** v2 form options arrive as objects or bare strings; the phone wants labels. */
+    /**
+ * Flatten a v2 tool call into the flat part shape the transcript renderer
+ * expects.
+ *
+ * v2 nests everything the card needs one level down inside `state`
+ * (status/input/output), and keys the call `id` at the top level. Passing the
+ * nested object straight through produced cards with no status, no input and no
+ * output, so tool cards had nothing to expand.
+ */
+private fun toolPart(call: JSONObject): JSONObject {
+    val state = call.optJSONObject("state") ?: JSONObject()
+    val output = state.optString("output")
+        .takeIf { it.isNotBlank() }
+        ?: state.optJSONObject("metadata")?.optString("output").orEmpty()
+        .takeIf { it.isNotBlank() }
+        ?: state.optString("error")
+    return JSONObject().apply {
+        put("type", "tool")
+        put("id", call.optString("id"))
+        put("tool", call.optString("name"))
+        put("state", state.optString("status"))
+        state.optJSONObject("input")?.let { put("input", it) }
+        if (output.isNotBlank()) put("output", output)
+    }
+}
+
+/**
+ * Flatten an attachment into the flat part shape.
+ *
+ * There is no `/api/file` in v2 to fetch bytes back through, so the card carries
+ * the reference and the mime and the client caches the image itself on first
+ * sight rather than re-fetching per render.
+ */
+private fun filePart(part: JSONObject, messageId: String, index: Int): JSONObject {
+    val name = part.optString("name")
+        .ifBlank { part.optString("filename") }
+        .ifBlank { part.optString("uri").substringAfterLast('/').ifBlank { "attachment" } }
+    return JSONObject().apply {
+        put("type", "file")
+        put("id", part.optString("id").ifBlank { "$messageId-f$index" })
+        put("filename", name)
+        put("mime", part.optString("mime"))
+        put("uri", part.optString("uri"))
+        // Inline attachments carry the bytes directly; reference ones only point
+        // at a path on the machine running opencode.
+        part.optString("data").takeIf { it.isNotBlank() }?.let { put("data", it) }
+    }
+}
+
+/** v2 form options arrive as objects or bare strings; the phone wants labels. */
     private fun formOptions(options: JSONArray?): JSONArray = JSONArray().apply {
         if (options == null) return@apply
         for (o in 0 until options.length()) {
@@ -577,5 +739,16 @@ class V2Client(
     private companion object {
         const val TAG = "V2Client"
         val JSON = "application/json; charset=utf-8".toMediaType()
+
+        /**
+         * Page sizes.
+         *
+         * These were 500 and 200. Over a remote tunnel that was 258 KB for the
+         * drawer and 4.1 MB to open one session, which is what made connecting
+         * and opening feel broken. The server's own defaults are 50 for both, so
+         * that is what we ask for; paging fills in the rest as the user scrolls.
+         */
+        const val SESSION_PAGE = 50
+        const val MESSAGE_PAGE = 50
     }
 }

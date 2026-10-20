@@ -4,9 +4,21 @@ import android.content.Context
 import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 /** How the app was given access to a server. */
 enum class AuthKind { Pairing, Password }
+
+/**
+ * Where the model and agent catalogs are cached between launches.
+ *
+ * `/api/model` answers with 892 KB and 1107 models, identically on every connect.
+ * Over a remote tunnel that is seconds the picker never needed to block on, so we
+ * keep the last good copy and refresh in the background instead. Per server,
+ * because which models exist depends on that machine's configured providers.
+ */
+fun catalogCacheFile(context: Context, serverId: String): File =
+    File(File(context.cacheDir, "catalogs"), "$serverId.json")
 
 /**
  * One opencode server the phone can talk to.

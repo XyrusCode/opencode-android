@@ -26,15 +26,20 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Difference
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -245,7 +250,7 @@ private fun PartCard(item: PartItem) {
             .padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(partIcon(item.type), contentDescription = null, tint = if (item.isError) MaterialTheme.colorScheme.error else Accent, modifier = Modifier.size(16.dp))
+            Icon(partIcon(item), contentDescription = null, tint = if (item.isError) MaterialTheme.colorScheme.error else Accent, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(8.dp))
             Text(
                 item.title,
@@ -256,7 +261,8 @@ private fun PartCard(item: PartItem) {
             )
             if (item.state == "running" || item.state == "pending") {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Accent)
-            } else {
+            } else if (item.body.isNotBlank()) {
+                // Only advertise the chevron when there is something to reveal.
                 Icon(Icons.Filled.ExpandMore, contentDescription = null, tint = TextDim, modifier = Modifier.size(16.dp))
             }
         }
@@ -266,26 +272,36 @@ private fun PartCard(item: PartItem) {
         }
         if (item.body.isNotBlank()) {
             Spacer(Modifier.padding(top = 6.dp))
-            if (expanded) {
-                ChatMarkdown(text = item.body, modifier = Modifier.fillMaxWidth())
-            } else {
-                Text(
-                    item.body.take(160),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextDim,
-                    maxLines = 3,
-                )
-            }
+            // The collapsed preview goes through the same renderer: showing the
+            // first line or two as raw text left literal ** and 1. markers in
+            // the card, which read as a rendering bug.
+            ChatMarkdown(
+                text = if (expanded) item.body else item.body.take(PREVIEW_CHARS),
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
+
+/** How much of a collapsed card's body to show. */
+private const val PREVIEW_CHARS = 420
 
 /** Display name for a project directory path. */
 private fun dirName(dir: String): String =
     dir.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
 
-private fun partIcon(type: String) = when (type) {
-    "tool" -> Icons.Filled.Build
+private fun partIcon(item: PartItem) = when (item.type) {
+    // Tool cards read better with the tool's own glyph than a generic wrench.
+    "tool" -> when (item.title) {
+        "Read" -> Icons.AutoMirrored.Filled.InsertDriveFile
+        "Write", "Edit" -> Icons.Filled.EditNote
+        "Shell" -> Icons.Filled.Terminal
+        "Search", "List" -> Icons.AutoMirrored.Filled.List
+        "Fetch" -> Icons.AutoMirrored.Filled.OpenInNew
+        else -> Icons.Filled.Build
+    }
+
+    "reasoning" -> Icons.Filled.Psychology
     "file" -> Icons.AutoMirrored.Filled.InsertDriveFile
     "patch", "snapshot" -> Icons.Filled.Difference
     else -> Icons.AutoMirrored.Filled.Article
@@ -473,11 +489,29 @@ private fun PermissionDialog(prompt: PermissionPrompt, onReply: (String) -> Unit
         containerColor = Panel,
         title = { Text(prompt.permission ?: "Permission requested", color = TextCol) },
         text = {
-            Column {
-                Text("opencode wants to run a tool.", style = MaterialTheme.typography.bodyMedium, color = TextCol)
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                // Prefer what opencode says it is about to do; the generic line
+                // only when the server sent nothing.
+                val explanation = prompt.message?.takeIf { it.isNotBlank() }
+                Text(
+                    explanation ?: "opencode wants to run a tool.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextCol,
+                )
                 if (prompt.patterns.isNotEmpty()) {
-                    Spacer(Modifier.padding(top = 8.dp))
-                    prompt.patterns.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = TextDim) }
+                    Spacer(Modifier.padding(top = 10.dp))
+                    prompt.patterns.forEach { target ->
+                        Row(Modifier.padding(bottom = 4.dp)) {
+                            Text("•", color = TextDim, style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                target,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextDim,
+                                fontFamily = PlexMono,
+                            )
+                        }
+                    }
                 }
             }
         },

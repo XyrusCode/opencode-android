@@ -4,6 +4,64 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-18
+
+### Fixed
+- Connecting and opening a session were slow enough to look broken, because the
+  app was asking for far more than it needed. Opening a session fetched 200
+  messages, which on a long session is 4.1 MB; it now fetches 50, the server's
+  own default. The drawer fetched 500 sessions (258 KB) for a list nobody
+  scrolls to the end of; it now fetches 50.
+- Sessions opened at the beginning of the conversation instead of the end. The
+  message endpoint was asked for its first page, which is oldest-first, so a
+  long session never reached what had just happened. It now asks for the newest
+  page and reverses it for display.
+- The app never connected at all, silently. `onConnectionChange` loaded sessions
+  from the main thread, which Android throws on, and the failure was swallowed.
+  Every request now runs off the main thread, and a deliberate teardown no longer
+  reports itself as a server failure.
+- `/api/project` was fetched on every connect and never read. The project picker
+  groups sessions by their working directory, which is what a person recognises,
+  so the 620 KB call is gone.
+- The model and agent catalogs (892 KB, 1107 models, identical every time) are
+  cached to disk per server and served from there on the first frame, refreshed
+  in the background. The pickers no longer hold up connecting.
+- Pairing tried each address in turn with a full timeout, so a phone that could
+  only reach the tunnel sat through four dead attempts first. Candidates are now
+  probed together and the whole set costs one timeout.
+- Tool cards for read, edit and shell could not be expanded, because v2 nests a
+  tool's status, input and output one level down and the translation was looking
+  for them at the top level. Cards now show what they did and expand their
+  output, with an icon per tool.
+- Attachments sent from the desktop did not appear at all. Content types beyond
+  text, reasoning and tool were discarded without a log line, so an image simply
+  did not exist. Attachments now render, and an unrecognised type is logged
+  rather than swallowed.
+- Markdown was flattened: paragraphs lost their breaks, headings lost their
+  size, and lists, italics, links, quotes and rules were not parsed at all.
+  There is a real block parser now.
+- Responses with a JSON array at the top level failed to parse. v2 answers
+  `/api/project` that way.
+
+### Added
+- Permission prompts show what opencode actually wants to do. v2 sends its own
+  explanation and it was being dropped, leaving the dialog to say only "wants to
+  run a tool", which is not something you can judge on a phone.
+
+### Known limitations
+- Uploading a file that exists only on the phone is not supported. v2's prompt
+  endpoint accepts a `uri` reference to a path on the machine running opencode
+  and nothing else; there is no upload endpoint in its 119 routes. Receiving and
+  displaying attachments works.
+
+## [0.6.1] - 2026-10-18
+
+### Fixed
+- Tapping "Add a server" closed the app. The add-server screen has its own
+  scrolling container and was being composed inside the connect screen's, so
+  Compose measured it with infinite height and threw. It now replaces the whole
+  screen, as it should for a page with its own back button.
+
 ## [0.6.0] - 2026-10-17
 
 ### Added

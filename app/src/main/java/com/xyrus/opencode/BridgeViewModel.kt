@@ -6,7 +6,6 @@ import com.xyrus.opencode.bridge.Agent
 import com.xyrus.opencode.bridge.BridgeClient
 import com.xyrus.opencode.bridge.HistoryMessage
 import com.xyrus.opencode.bridge.PermissionPrompt
-import com.xyrus.opencode.bridge.Project
 import com.xyrus.opencode.bridge.Provider
 import com.xyrus.opencode.bridge.QuestionPrompt
 import com.xyrus.opencode.bridge.Session
@@ -20,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.io.File
 
 const val DEFAULT_AUTH_TOKEN = "opencode-2026-mobile-companion"
 const val DEFAULT_PORT = 9876
@@ -87,10 +87,12 @@ data class UiState(
     val transcript: List<TranscriptItem> = emptyList(),
     val streaming: Boolean = false,
     val error: String? = null,
-    // Catalogs for the picker sheets.
+    // Catalogs for the picker sheets. Projects are deliberately absent: the picker
+    // groups the session list by working directory (see realProjects), which is
+    // what a person recognises. The server's /api/project is a list of ids and
+    // canonical paths that meant nothing to navigate by.
     val providers: List<Provider> = emptyList(),
     val agents: List<Agent> = emptyList(),
-    val projects: List<Project> = emptyList(),
     // Active selection, re-sent before every prompt (the bridge pops it).
     val selectedModel: ModelChoice? = null,
     val selectedAgent: String? = null,
@@ -127,10 +129,11 @@ class BridgeViewModel : ViewModel() {
     fun setPort(port: Int) = _state.update { it.copy(port = port) }
 
     /** Connect straight to an opencode v2 server with a paired token or password. */
-    fun connectDirect(server: ServerConfig) {
+    fun connectDirect(server: ServerConfig, catalogCache: File? = null) {
         disconnect()
         val direct = V2Client(
             server = server,
+            catalogCache = catalogCache,
             onMessage = { frame -> viewModelScope.launch { handle(frame) } },
             onStateChange = { state -> viewModelScope.launch { onConnectionChange(state) } },
         )
@@ -371,7 +374,6 @@ class BridgeViewModel : ViewModel() {
 
             "providers" -> _state.update { it.copy(providers = frame.providers) }
             "agents" -> _state.update { it.copy(agents = frame.agents) }
-            "projects" -> _state.update { it.copy(projects = frame.projects) }
 
             "model" -> _state.update {
                 it.copy(
@@ -491,7 +493,14 @@ private fun partFrom(part: JSONObject, role: String): PartItem {
                 ?: part.optStringOrNullSafe("result")
                 ?: errorText
                 ?: ""
-            PartItem(id, type, tool, input.take(120), output.take(BODY_LIMIT), state, isError)
+            PartItem(id, type, toolLabel(tool), input.take(120), output.take(BODY_LIMIT), state, isError)
+        }
+
+        "reasoning" -> {
+            PartItem(
+                id, type, "Thinking", "",
+                part.optStringOrNullSafe("text").orEmpty().take(BODY_LIMIT), state, isError,
+            )
         }
 
         "file" -> {
@@ -532,6 +541,23 @@ private fun compact(obj: JSONObject, limit: Int = 3): String {
         parts += "$key=${obj.opt(key)?.toString()?.take(40)}"
     }
     return parts.joinToString(", ")
+}
+
+/**
+ * Tool names arrive lowercase and internal ("read", "bash"). Capitalising the
+ * known ones reads like the desktop app instead of leaking the RPC name.
+ */
+private fun toolLabel(tool: String): String = when (tool) {
+    "read" -> "Read"
+    "write" -> "Write"
+    "edit", "multiedit", "patch" -> "Edit"
+    "shell", "bash", "bash_output" -> "Shell"
+    "glob", "grep" -> "Search"
+    "list", "ls" -> "List"
+    "webfetch", "fetch" -> "Fetch"
+    "task", "agent" -> "Agent"
+    "todowrite", "todo" -> "Todo"
+    else -> tool.replaceFirstChar { it.uppercase() }
 }
 
 private const val BODY_LIMIT = 6000
