@@ -127,13 +127,10 @@ jobs:
           body: |
             opencode companion app for Android.
 
-            Install the APK on your phone, then start the bridge on your desktop
-            with `opencode-bridge` and enter the desktop's IP on the pairing
-            screen.
-
-            **Note:** this APK is signed with the debug key so it is installable
-            for testing. Uninstall any previous build before upgrading once a
-            release key is in place.
+            Install the APK on your phone, then pair it with the opencode running
+            on your machine. From 0.5.1 every release is signed with the same
+            key, so you can upgrade in place: the app's own update screen
+            installs this over the previous version without uninstalling.
 
             ---
             ## What's new in this version
